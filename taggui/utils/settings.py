@@ -8,7 +8,12 @@ DEFAULT_SETTINGS = {
     'image_list_image_width': 200,
     'tag_separator': ',',
     'insert_space_after_tag_separator': True,
-    'autocomplete_tags': True
+    'autocomplete_tags': True,
+    # Percentage scale applied to the whole GUI (fonts, icons, spacing, and
+    # widget sizes) via `QT_SCALE_FACTOR`. Takes effect on restart because
+    # Qt reads this environment variable only once, at `QApplication`
+    # construction.
+    'ui_scale_percent': 100
 }
 
 
