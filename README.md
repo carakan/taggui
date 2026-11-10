@@ -13,7 +13,7 @@ models.
 - Keyboard-friendly interface for fast tagging
 - Tag autocomplete based on your own most-used tags
 - Integrated token counter (for Stable Diffusion)
-- Automatic caption and tag generation
+- AI tagging with a local vision language model
 - Batch tag operations for renaming, deleting, and sorting tags
 - Advanced image list filtering
 
@@ -46,67 +46,131 @@ images.
 Any changes you make to the tags are also automatically saved to these `.txt`
 files.
 
-## Automatic Captioning
+## AI Tagging
 
-<img src='images/auto-captioner-v1.18.0.png' alt='Auto-captioner screenshot' width='100%'>
+<img src='images/auto-captioner-v1.18.0.png' alt='AI tagger screenshot' width='100%'>
 
-In addition to manual tagging, you can automatically generate captions or tags
-for your images inside TagGUI.
-GPU generation requires a compatible NVIDIA GPU, and CPU generation is also
-supported.
+In addition to manual tagging, TagGUI can generate the tags of your images
+with a local vision language model.
+The model runs on your own machine, behind an OpenAI-compatible HTTP API,
+so no data leaves the computer and no GPU support is needed inside TagGUI.
 
-To use the feature, select the images you want to caption in the image list,
-then select the captioning model you want to use in the Auto-Captioner pane.
-If you have a local directory containing previously downloaded models, you can
-set it in `File` -> `Settings` to include the models in the model list.
-Click the `Start Auto-Captioning` button to start captioning.
-You can select multiple images to batch generate captions for all of them.
-It can take up to several minutes to download and load a model when you first
-use it, but subsequent generations will be much faster.
+The reference setup is a [llama.cpp](https://github.com/ggml-org/llama.cpp)
+server running a vision model such as Pixtral:
 
-### Captioning parameters
+```bash
+llama-server -m pixtral-12b-2409-q4.gguf --host 127.0.0.1 --port 8080
+```
 
-`Prompt`: Instructions given to the captioning model.
-Prompt formats are handled automatically based on the selected model.
-You can use the following template variables to dynamically insert information
-about each image into the prompt:
+The server exposes `http://127.0.0.1:8080/v1`, which is the default of the
+`AI Tagger` pane.
 
-- `{tags}`: The tags of the image, separated by commas.
-- `{name}`: The file name of the image without the extension.
-- `{directory}` or `{folder}`: The name of the directory containing the image.
+To use the feature, select the images you want to tag in the image list,
+check the server settings in the `AI Tagger` pane, then click
+`Start Tagging`.
+The new tags are written to the `.txt` files of the images, just like the
+tags you add by hand.
 
-An example prompt using a template variable could be
-`Describe the image using the following tags as context: {tags}`.
-With this prompt, `{tags}` would be replaced with the existing tags of each
-image before the prompt is sent to the model.
+You can also send the selected images to the tagger from the image list,
+with the `Send to AI Tagger` button at the bottom of the pane or with the
+same entry in its context menu.
+The tagger is brought to the front and its scope is set to the selected
+images, so that only they are tagged.
 
-`Start caption with`: Generated captions will start with this text.
 
-`Remove tag separators in caption`: If checked, tag separators (commas by
-default) will be removed from the generated captions.
+### Tagging modes
 
-`Discourage from caption`: Words or phrases that should not be present in the
-generated captions.
-You can separate multiple words or phrases with commas (`,`).
-For example, you can put `appears,seems,possibly` to prevent the model from
-using an uncertain tone in the captions.
-The words may still be generated due to limitations related to tokenization.
+- `Retag (add to existing tags)`: the tags of the model are added to the
+  existing caption. The tags that are already there are kept, except the
+  ones in the ignore list.
+- `Prune (rebuild from image)`: the caption is rebuilt from the image alone.
+  The existing caption is only used as protected vocabulary, so local terms
+  (dance names, garment names, words in another language) survive the
+  rebuild. Turn off `Keep local vocabulary when pruning` to drop them
+  entirely.
 
-`Include in caption`: Words or phrases that should be present somewhere in the
-generated captions.
-You can separate multiple words or phrases with commas (`,`).
-You can also allow the captioning model to choose from a group of words or
-phrases by separating them with `|`.
-For example, if you put `cat,orange|white|black`, the model will attempt to
-generate captions that contain the word `cat` and either `orange`, `white`,
-or `black`.
-It is not guaranteed that all of your specifications will be met.
+### Tagging parameters
 
-`Tags to exclude` (WD Tagger models): Tags that should not be generated,
-separated by commas.
+`Server URL`, `API key`, `Model`: How to reach the model server.
+The API key is only sent to the server as a bearer token; a server without
+authentication accepts any value.
+The key is read from the `LLAMACPP_API_KEY` environment variable by default,
+and it can also be typed in the pane, where it is remembered.
 
-Many of the other generation parameters are described in the
-[Hugging Face documentation](https://huggingface.co/docs/transformers/main/en/main_classes/text_generation#transformers.GenerationConfig).
+`Trigger word`: The trigger word of the dataset.
+By default the first tag of the existing caption is used, and the name of
+the image folder when the caption is empty.
+The trigger word is always the first tag of the caption and is never
+described by the model.
+
+`Tag order`: Whether the tags are sorted by frequency across the dataset
+(the default) or alphabetically.
+The trigger word always stays first.
+
+`Maximum tags`, `Maximum tokens`, `Temperature`, `Repeat penalty`,
+`Timeout`: The generation parameters sent to the model.
+
+`Images`: Whether the run covers the selected images, the images left by the
+current filter, or all loaded images.
+
+`Skip images that already have tags`: Only tag the images without a caption.
+
+`Resume: skip captions already changed in git`: Skip the images whose
+`.txt` file is already modified in git, to resume an interrupted run.
+The dataset root must be a git repository.
+
+`Dry run (do not write captions)`: Print the new captions in the console
+without writing them.
+
+`Image limit (0 = all)`: Tag at most this many images.
+
+### The prompt template
+
+Click `Show Prompt Template` to see the full prompt that is sent to the
+model, and to override it.
+The template contains the `{trigger}` and `{max_tags}` placeholders, which
+are replaced for every image.
+The default template is the one from the reference tagging script, and it
+enforces a danbooru-style vocabulary, a single count tag, and one
+alphabetically ordered color tag per garment.
+
+### Dataset vocabulary
+
+The dataset can carry a vocabulary, in the same format as the reference
+tagging script:
+
+- `.ignoretags` in the dataset root: the tags that are never added to a
+  caption. The lines before the first `#foldername` header apply to every
+  folder; each `#foldername` header starts a section for that folder.
+- `.ignoretags` in a folder: the ignore tags of that folder only.
+- `.basetags` in the dataset root and in a folder: the concept tags of the
+  dataset. They are sent to the model as vocabulary, which keeps the
+  terminology of a dataset consistent.
+
+Click `Edit Dataset Vocabulary` to review and edit these files.
+
+### Utilities
+
+The `Utilities` pane generates the vocabulary of a dataset folder out of the
+tags that the dataset already uses.
+
+Pick the dataset folder in the dropdown, then use one of the two buttons:
+
+- `Generate Ignore Tags`: opens the tags of the folder with a checkbox for
+  each of them. The tags that you check are never added to a caption; they
+  are written to the `.ignoretags` file of the dataset root, under the
+  `#foldername` section.
+- `Generate Base Tags`: opens the same list. The tags that you check become
+  the concept vocabulary of the folder and are written to the `.basetags`
+  file of the folder, one tag per row. They are sent to the model with every
+  image, which keeps the terminology of a dataset consistent.
+
+In both dialogs the tags are listed with the number of images they appear
+in, most frequent first. Use the filter box to narrow the list down, and
+`Select All` / `Select None` to check the tags that are shown. The trigger
+word is never offered, and the tags that are already stored are shown
+checked and cannot be unchecked.
+
 
 ## Advanced Image List Filtering
 
@@ -214,7 +278,7 @@ You can nest parentheses and operators to create arbitrarily complex filters.
 - Focus the `Add Tag` box: `Alt`+`A`
 - Focus the `Image Tags` list: `Alt`+`I`
 - Focus the `Search Tags` box: `Alt`+`S`
-- Focus the `Start Auto-Captioning` button: `Alt`+`C`
+- Focus the `Start Tagging` button: `Alt`+`C`
 
 ### Images pane
 

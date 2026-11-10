@@ -1,12 +1,11 @@
 from pathlib import Path
 
-from PySide6.QtCore import QKeyCombination, QModelIndex, QUrl, Qt, Slot
+from PySide6.QtCore import QKeyCombination, QModelIndex, QTimer, QUrl, Qt, Slot
 from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QIcon,
                            QKeySequence, QPixmap, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow,
                                QMessageBox, QStackedWidget, QVBoxLayout,
                                QWidget)
-from transformers import AutoTokenizer
 
 from dialogs.batch_reorder_tags_dialog import BatchReorderTagsDialog
 from dialogs.find_and_replace_dialog import FindAndReplaceDialog
@@ -20,16 +19,21 @@ from utils.image import Image
 from utils.key_press_forwarder import KeyPressForwarder
 from utils.settings import DEFAULT_SETTINGS, get_settings, get_tag_separator
 from utils.shortcut_remover import ShortcutRemover
+from utils.git_info import GitCaptionState
+from utils.token_counter import TokenCounter
 from utils.utils import get_resource_path, pluralize
 from widgets.all_tags_editor import AllTagsEditor
-from widgets.auto_captioner import AutoCaptioner
+from widgets.image_info_overlay import ImageInfo, get_caption_path
 from widgets.image_list import ImageList
 from widgets.image_tags_editor import ImageTagsEditor
 from widgets.image_viewer import ImageViewer
+from widgets.llm_tagger import LlmTagger, TagScope
+from widgets.utilities import Utilities
 
 ICON_PATH = Path('images/icon.ico')
 GITHUB_REPOSITORY_URL = 'https://github.com/jhc13/taggui'
-TOKENIZER_DIRECTORY_PATH = Path('clip-vit-base-patch32')
+# The number of selected images shown in the overlay on the large image.
+MAX_OVERLAY_IMAGES = 12
 
 
 class MainWindow(QMainWindow):
@@ -46,8 +50,7 @@ class MainWindow(QMainWindow):
         tag_separator = get_tag_separator()
         self.image_list_model = ImageListModel(image_list_image_width,
                                                tag_separator)
-        tokenizer = AutoTokenizer.from_pretrained(
-            get_resource_path(TOKENIZER_DIRECTORY_PATH))
+        tokenizer = TokenCounter()
         self.proxy_image_list_model = ProxyImageListModel(
             self.image_list_model, tokenizer, tag_separator)
         self.image_list_model.proxy_image_list_model = (
@@ -62,6 +65,14 @@ class MainWindow(QMainWindow):
         # everything has the correct font size.
         self.set_font_size()
         self.image_viewer = ImageViewer(self.proxy_image_list_model)
+        # The git state of the dataset, used to show the caption changes.
+        self.git_caption_state = GitCaptionState()
+        # The overlay is updated after the current change is finished, so
+        # that the caption file has been written to disk by then.
+        self.image_info_timer = QTimer(self)
+        self.image_info_timer.setSingleShot(True)
+        self.image_info_timer.setInterval(0)
+        self.image_info_timer.timeout.connect(self.update_image_info_overlay)
         self.create_central_widget()
         self.image_list = ImageList(self.proxy_image_list_model,
                                     tag_separator, image_list_image_width)
@@ -78,11 +89,20 @@ class MainWindow(QMainWindow):
                                                 .all_tags_list)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self.all_tags_editor)
-        self.auto_captioner = AutoCaptioner(self.image_list_model,
-                                            self.image_list)
+        self.llm_tagger = LlmTagger(self.image_list_model, self.image_list)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
-                           self.auto_captioner)
-        self.tabifyDockWidget(self.all_tags_editor, self.auto_captioner)
+                           self.llm_tagger)
+        self.utilities = Utilities(self.image_list_model)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
+                           self.utilities)
+        # The utilities panel is updated after the current change, because
+        # the tag counts change with it.
+        self.utilities_timer = QTimer(self)
+        self.utilities_timer.setSingleShot(True)
+        self.utilities_timer.setInterval(0)
+        self.utilities_timer.timeout.connect(self.utilities.refresh)
+        self.tabifyDockWidget(self.all_tags_editor, self.llm_tagger)
+        self.tabifyDockWidget(self.llm_tagger, self.utilities)
         self.all_tags_editor.raise_()
         # Set default widths for the dock widgets.
         # Temporarily set a size for the window so that the dock widgets can be
@@ -96,7 +116,7 @@ class MainWindow(QMainWindow):
                          Qt.Orientation.Horizontal)
         # Disable some widgets until a directory is loaded.
         self.image_tags_editor.tag_input_box.setDisabled(True)
-        self.auto_captioner.start_cancel_button.setDisabled(True)
+        self.llm_tagger.start_cancel_button.setDisabled(True)
         self.reload_directory_action = QAction('Reload Directory', parent=self)
         self.reload_directory_action.setDisabled(True)
         self.undo_action = QAction('Undo', parent=self)
@@ -105,8 +125,8 @@ class MainWindow(QMainWindow):
         self.toggle_image_tags_editor_action = QAction('Image Tags',
                                                        parent=self)
         self.toggle_all_tags_editor_action = QAction('All Tags', parent=self)
-        self.toggle_auto_captioner_action = QAction('Auto-Captioner',
-                                                    parent=self)
+        self.toggle_llm_tagger_action = QAction('AI Tagger', parent=self)
+        self.toggle_utilities_action = QAction('Utilities', parent=self)
         self.create_menus()
 
         self.image_list_selection_model = (self.image_list.list_view
@@ -116,7 +136,7 @@ class MainWindow(QMainWindow):
         self.connect_image_list_signals()
         self.connect_image_tags_editor_signals()
         self.connect_all_tags_editor_signals()
-        self.connect_auto_captioner_signals()
+        self.connect_llm_tagger_signals()
         # Forward any unhandled image changing key presses to the image list.
         key_press_forwarder = KeyPressForwarder(
             parent=self, target=self.image_list.list_view,
@@ -163,9 +183,9 @@ class MainWindow(QMainWindow):
             self.all_tags_editor.filter_line_edit.setFocus)
         focus_caption_button_shortcut = QShortcut(QKeySequence('Alt+C'), self)
         focus_caption_button_shortcut.activated.connect(
-            self.auto_captioner.raise_)
+            self.llm_tagger.raise_)
         focus_caption_button_shortcut.activated.connect(
-            self.auto_captioner.start_cancel_button.setFocus)
+            self.llm_tagger.start_cancel_button.setFocus)
         go_to_previous_image_shortcut = QShortcut(QKeySequence('Ctrl+Up'),
                                                   self)
         go_to_previous_image_shortcut.activated.connect(
@@ -223,7 +243,11 @@ class MainWindow(QMainWindow):
         self.centralWidget().setCurrentWidget(self.image_viewer)
         self.reload_directory_action.setDisabled(False)
         self.image_tags_editor.tag_input_box.setDisabled(False)
-        self.auto_captioner.start_cancel_button.setDisabled(False)
+        self.llm_tagger.start_cancel_button.setDisabled(False)
+        self.llm_tagger.set_directory_path(self.directory_path)
+        self.utilities.set_directory_path(self.directory_path)
+        self.git_caption_state.set_directory(self.directory_path)
+        self.update_image_info_overlay()
 
     @Slot()
     def select_and_load_directory(self):
@@ -358,19 +382,23 @@ class MainWindow(QMainWindow):
         self.toggle_image_list_action.setCheckable(True)
         self.toggle_image_tags_editor_action.setCheckable(True)
         self.toggle_all_tags_editor_action.setCheckable(True)
-        self.toggle_auto_captioner_action.setCheckable(True)
+        self.toggle_llm_tagger_action.setCheckable(True)
+        self.toggle_utilities_action.setCheckable(True)
         self.toggle_image_list_action.triggered.connect(
             lambda is_checked: self.image_list.setVisible(is_checked))
         self.toggle_image_tags_editor_action.triggered.connect(
             lambda is_checked: self.image_tags_editor.setVisible(is_checked))
         self.toggle_all_tags_editor_action.triggered.connect(
             lambda is_checked: self.all_tags_editor.setVisible(is_checked))
-        self.toggle_auto_captioner_action.triggered.connect(
-            lambda is_checked: self.auto_captioner.setVisible(is_checked))
+        self.toggle_llm_tagger_action.triggered.connect(
+            lambda is_checked: self.llm_tagger.setVisible(is_checked))
+        self.toggle_utilities_action.triggered.connect(
+            lambda is_checked: self.utilities.setVisible(is_checked))
         view_menu.addAction(self.toggle_image_list_action)
         view_menu.addAction(self.toggle_image_tags_editor_action)
         view_menu.addAction(self.toggle_all_tags_editor_action)
-        view_menu.addAction(self.toggle_auto_captioner_action)
+        view_menu.addAction(self.toggle_llm_tagger_action)
+        view_menu.addAction(self.toggle_utilities_action)
 
         help_menu = menu_bar.addMenu('Help')
         open_github_repository_action = QAction('GitHub', parent=self)
@@ -425,6 +453,75 @@ class MainWindow(QMainWindow):
                         else 'filtered_image_index')
         self.settings.setValue(settings_key, proxy_image_index.row())
 
+    @Slot()
+    def schedule_image_info_update(self):
+        """Updates the overlay after the current change is finished.
+
+        The caption file is written to disk after the change is signalled,
+        so the update is deferred to read the file after it was written.
+        """
+        self.image_info_timer.start()
+
+    @Slot(list)
+    def send_images_to_ai_tagger(self, image_indices: list[QModelIndex]):
+        """Tag the selected images with the AI tagger.
+
+        The scope of the tagger is set to the selected images, so that the
+        run covers exactly the images that were selected.
+        """
+        self.llm_tagger.set_scope(TagScope.SELECTED)
+        self.llm_tagger.raise_()
+        self.llm_tagger.start_tagging_images(image_indices)
+
+    @Slot()
+    def schedule_utilities_refresh(self):
+        """Updates the utilities panel after the current change."""
+        self.utilities_timer.start()
+
+    @Slot()
+    def update_image_info_overlay(self):
+        """Update the overlay on the large image.
+
+        The overlay shows the dimensions of every selected image and, when
+        the dataset is a git repository, the tags that were added and
+        removed in the caption file of the image since the committed
+        version.
+        """
+        selected_indices = self.image_list.get_selected_image_indices()
+        current_index = self.image_list_selection_model.currentIndex()
+        current_source_index = (self.proxy_image_list_model.mapToSource(
+            current_index) if current_index.isValid() else None)
+        entries = []
+        for source_index in selected_indices:
+            image: Image = self.image_list_model.data(
+                source_index, Qt.ItemDataRole.UserRole)
+            if image is None:
+                continue
+            entries.append(ImageInfo(
+                name=image.path.name,
+                dimensions=image.dimensions,
+                is_current=(current_source_index is not None
+                            and source_index == current_source_index)))
+        hidden_count = 0
+        if len(entries) > MAX_OVERLAY_IMAGES:
+            hidden_count = len(entries) - MAX_OVERLAY_IMAGES
+            entries = entries[:MAX_OVERLAY_IMAGES]
+        caption_paths = []
+        current_tags = {}
+        for entry, source_index in zip(entries, selected_indices[:len(entries)]):
+            image: Image = self.image_list_model.data(
+                source_index, Qt.ItemDataRole.UserRole)
+            if image is None:
+                continue
+            caption_path = get_caption_path(image.path)
+            caption_paths.append(caption_path)
+            current_tags[caption_path] = image.tags
+        diffs = self.git_caption_state.get_diffs(caption_paths, current_tags,
+                                                 force=True)
+        for entry, caption_path in zip(entries, caption_paths):
+            entry.diff = diffs.get(caption_path)
+        self.image_viewer.set_overlay_info(entries, hidden_count)
+
     def connect_image_list_signals(self):
         self.image_list.filter_line_edit.textChanged.connect(
             self.set_image_list_filter)
@@ -436,6 +533,10 @@ class MainWindow(QMainWindow):
             self.image_viewer.load_image)
         self.image_list_selection_model.currentChanged.connect(
             self.image_tags_editor.load_image_tags)
+        self.image_list_selection_model.currentChanged.connect(
+            self.schedule_image_info_update)
+        self.image_list_selection_model.selectionChanged.connect(
+            self.schedule_image_info_update)
         self.image_list_model.modelReset.connect(
             lambda: self.tag_counter_model.count_tags(
                 self.image_list_model.images))
@@ -444,6 +545,10 @@ class MainWindow(QMainWindow):
                 self.image_list_model.images))
         self.image_list_model.dataChanged.connect(
             self.image_tags_editor.reload_image_tags_if_changed)
+        self.image_list_model.dataChanged.connect(
+            self.schedule_image_info_update)
+        self.image_list_model.dataChanged.connect(
+            self.schedule_utilities_refresh)
         self.image_list_model.update_undo_and_redo_actions_requested.connect(
             self.update_undo_and_redo_actions)
         # Rows are inserted or removed from the proxy image list model when the
@@ -458,6 +563,8 @@ class MainWindow(QMainWindow):
             self.reload_directory)
         self.image_list.list_view.tags_paste_requested.connect(
             self.image_list_model.add_tags)
+        self.image_list.list_view.send_to_tagger_requested.connect(
+            self.send_images_to_ai_tagger)
         # Connecting the signal directly without `isVisible()` causes the menu
         # item to be unchecked when the widget is an inactive tab.
         self.image_list.visibilityChanged.connect(
@@ -543,17 +650,20 @@ class MainWindow(QMainWindow):
             lambda: self.toggle_all_tags_editor_action.setChecked(
                 self.all_tags_editor.isVisible()))
 
-    def connect_auto_captioner_signals(self):
-        self.auto_captioner.caption_generated.connect(
-            lambda image_index, _, tags:
+    def connect_llm_tagger_signals(self):
+        self.llm_tagger.tags_generated.connect(
+            lambda image_index, tags:
             self.image_list_model.update_image_tags(image_index, tags))
-        self.auto_captioner.caption_generated.connect(
+        self.llm_tagger.tags_generated.connect(
             lambda image_index, *_:
             self.image_tags_editor.reload_image_tags_if_changed(image_index,
                                                                 image_index))
-        self.auto_captioner.visibilityChanged.connect(
-            lambda: self.toggle_auto_captioner_action.setChecked(
-                self.auto_captioner.isVisible()))
+        self.llm_tagger.visibilityChanged.connect(
+            lambda: self.toggle_llm_tagger_action.setChecked(
+                self.llm_tagger.isVisible()))
+        self.utilities.visibilityChanged.connect(
+            lambda: self.toggle_utilities_action.setChecked(
+                self.utilities.isVisible()))
 
     def restore(self):
         # Restore the window geometry and state.

@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QCheckBox, QPushButton
+from PySide6.QtWidgets import QCheckBox, QFrame, QPushButton
 
 from utils.settings import DEFAULT_SETTINGS, get_settings
 
@@ -27,3 +27,10 @@ class BigCheckBox(QCheckBox):
         self.setStyleSheet(
             f'QCheckBox::indicator '
             f'{{ width: {new_size}px; height: {new_size}px; }}')
+
+
+class HorizontalLine(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setFrameShape(QFrame.Shape.HLine)
+        self.setFrameShadow(QFrame.Shadow.Raised)

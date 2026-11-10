@@ -2,9 +2,7 @@
 
 datas = [('clip-vit-base-patch32', 'clip-vit-base-patch32'),
          ('images/icon.ico', 'images')]
-hiddenimports = [
-    'timm.models.layers',
-]
+hiddenimports = []
 
 block_cipher = None
 

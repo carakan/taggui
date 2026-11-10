@@ -17,6 +17,7 @@ from pyparsing import (CaselessKeyword, CaselessLiteral, Group, OpAssoc,
                        infix_notation, nums, one_of, printables)
 
 from models.proxy_image_list_model import ProxyImageListModel
+from utils.big_widgets import TallPushButton
 from utils.image import Image
 from utils.settings import get_settings
 from utils.settings_widgets import SettingsComboBox
@@ -99,6 +100,8 @@ class SelectionMode(str, Enum):
 class ImageListView(QListView):
     tags_paste_requested = Signal(list, list)
     directory_reload_requested = Signal()
+    # The images that were selected when the action was triggered.
+    send_to_tagger_requested = Signal(list)
 
     def __init__(self, parent, proxy_image_list_model: ProxyImageListModel,
                  tag_separator: str, image_width: int):
@@ -146,6 +149,9 @@ class ImageListView(QListView):
         self.open_image_action = self.addAction('Open Image in Default App')
         self.open_image_action.setShortcut('Ctrl+O')
         self.open_image_action.triggered.connect(self.open_image)
+        self.send_to_tagger_action = self.addAction('Send to AI Tagger')
+        self.send_to_tagger_action.triggered.connect(
+            self.send_selected_images_to_tagger)
 
         self.context_menu = QMenu(self)
         self.context_menu.addAction('Select All Images', self.selectAll,
@@ -156,6 +162,8 @@ class ImageListView(QListView):
         self.context_menu.addAction(paste_tags_action)
         self.context_menu.addAction(self.copy_file_names_action)
         self.context_menu.addAction(self.copy_paths_action)
+        self.context_menu.addSeparator()
+        self.context_menu.addAction(self.send_to_tagger_action)
         self.context_menu.addSeparator()
         self.context_menu.addAction(self.move_images_action)
         self.context_menu.addAction(self.copy_images_action)
@@ -313,6 +321,14 @@ class ImageListView(QListView):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(image_path)))
 
     @Slot()
+    def send_selected_images_to_tagger(self):
+        """Send the selected images to the AI tagger."""
+        image_indices = self.get_selected_image_indices()
+        if not image_indices:
+            return
+        self.send_to_tagger_requested.emit(image_indices)
+
+    @Slot()
     def update_context_menu_actions(self):
         selected_image_count = len(self.selectedIndexes())
         copy_file_names_action_name = (
@@ -331,6 +347,14 @@ class ImageListView(QListView):
         self.copy_images_action.setText(copy_images_action_name)
         self.delete_images_action.setText(delete_images_action_name)
         self.open_image_action.setVisible(selected_image_count == 1)
+        if selected_image_count > 1:
+            send_to_tagger_action_name = (
+                f'Send {selected_image_count} '
+                f'{pluralize("Image", selected_image_count)} to AI Tagger')
+        else:
+            send_to_tagger_action_name = 'Send to AI Tagger'
+        self.send_to_tagger_action.setText(send_to_tagger_action_name)
+        self.send_to_tagger_action.setEnabled(selected_image_count > 0)
 
 
 class ImageList(QDockWidget):
@@ -355,6 +379,10 @@ class ImageList(QDockWidget):
                                         stretch=1)
         self.list_view = ImageListView(self, proxy_image_list_model,
                                        tag_separator, image_width)
+        self.send_to_tagger_button = TallPushButton('Send to AI Tagger')
+        self.send_to_tagger_button.setEnabled(False)
+        self.send_to_tagger_button.clicked.connect(
+            self.list_view.send_selected_images_to_tagger)
         self.image_index_label = QLabel()
         # A container widget is required to use a layout with a `QDockWidget`.
         container = QWidget()
@@ -363,11 +391,27 @@ class ImageList(QDockWidget):
         layout.addLayout(selection_mode_layout)
         layout.addWidget(self.list_view)
         layout.addWidget(self.image_index_label)
+        layout.addWidget(self.send_to_tagger_button)
         self.setWidget(container)
 
         self.selection_mode_combo_box.currentTextChanged.connect(
             self.set_selection_mode)
         self.set_selection_mode(self.selection_mode_combo_box.currentText())
+        self.list_view.selectionModel().selectionChanged.connect(
+            self.update_send_to_tagger_button)
+
+    @Slot()
+    def update_send_to_tagger_button(self):
+        """Enables the button when images are selected."""
+        selected_image_count = len(self.list_view.selectedIndexes())
+        self.send_to_tagger_button.setEnabled(selected_image_count > 0)
+        if selected_image_count > 1:
+            button_text = (f'Send {selected_image_count} '
+                           f'{pluralize("Image", selected_image_count)} to AI '
+                           'Tagger')
+        else:
+            button_text = 'Send to AI Tagger'
+        self.send_to_tagger_button.setText(button_text)
 
     def set_selection_mode(self, selection_mode: str):
         if selection_mode == SelectionMode.DEFAULT:

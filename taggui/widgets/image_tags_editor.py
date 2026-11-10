@@ -4,12 +4,12 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (QAbstractItemView, QCompleter, QDockWidget,
                                QLabel, QLineEdit, QListView, QMessageBox,
                                QVBoxLayout, QWidget)
-from transformers import PreTrainedTokenizerBase
 
 from models.proxy_image_list_model import ProxyImageListModel
 from models.tag_counter_model import TagCounterModel
 from utils.image import Image
 from utils.settings import DEFAULT_SETTINGS, get_settings
+from utils.token_counter import TokenCounter
 from utils.text_edit_item_delegate import TextEditItemDelegate
 from utils.utils import get_confirmation_dialog_reply
 from widgets.image_list import ImageList
@@ -137,7 +137,7 @@ class ImageTagsEditor(QDockWidget):
     def __init__(self, proxy_image_list_model: ProxyImageListModel,
                  tag_counter_model: TagCounterModel,
                  image_tag_list_model: QStringListModel, image_list: ImageList,
-                 tokenizer: PreTrainedTokenizerBase, tag_separator: str):
+                 tokenizer: TokenCounter, tag_separator: str):
         super().__init__()
         self.proxy_image_list_model = proxy_image_list_model
         self.image_tag_list_model = image_tag_list_model
@@ -180,8 +180,7 @@ class ImageTagsEditor(QDockWidget):
     def count_tokens(self):
         caption = self.tag_separator.join(
             self.image_tag_list_model.stringList())
-        # Subtract 2 for the `<|startoftext|>` and `<|endoftext|>` tokens.
-        caption_token_count = len(self.tokenizer(caption).input_ids) - 2
+        caption_token_count = self.tokenizer.count_tokens(caption)
         if caption_token_count > MAX_TOKEN_COUNT:
             self.token_count_label.setStyleSheet('color: red;')
         else:
