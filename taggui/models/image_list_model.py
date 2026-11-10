@@ -8,8 +8,8 @@ from pathlib import Path
 
 import exifread
 import imagesize
-from PySide6.QtCore import (QAbstractListModel, QModelIndex, QSize, Qt, Signal,
-                            Slot)
+from PySide6.QtCore import (QAbstractListModel, QMimeData, QModelIndex, QSize,
+                            Qt, QUrl, Signal, Slot)
 from PySide6.QtGui import QIcon, QImageReader, QPixmap
 from PySide6.QtWidgets import QMessageBox
 
@@ -63,6 +63,24 @@ class ImageListModel(QAbstractListModel):
     def rowCount(self, parent=None) -> int:
         return len(self.images)
 
+    def flags(self, index):
+        default_flags = super().flags(index)
+        if index.isValid():
+            return Qt.ItemFlag.ItemIsDragEnabled | default_flags
+        return default_flags
+
+    def mimeTypes(self) -> list[str]:
+        return ['text/uri-list', 'text/plain']
+
+    def mimeData(self, indexes) -> QMimeData:
+        """The images that are dragged out of the image list."""
+        urls = [QUrl.fromLocalFile(str(self.data(
+            index, Qt.ItemDataRole.UserRole).path)) for index in indexes]
+        mime_data = QMimeData()
+        mime_data.setUrls(urls)
+        mime_data.setText('\r\n'.join(url.toString() for url in urls))
+        return mime_data
+
     def data(self, index, role=None) -> Image | str | QIcon | QSize:
         image = self.images[index.row()]
         if role == Qt.ItemDataRole.UserRole:
@@ -101,6 +119,7 @@ class ImageListModel(QAbstractListModel):
                          int(self.image_list_image_width * height / width))
 
     def load_directory(self, directory_path: Path):
+        self.beginResetModel()
         self.images.clear()
         self.undo_stack.clear()
         self.redo_stack.clear()
@@ -131,6 +150,7 @@ class ImageListModel(QAbstractListModel):
                     try:
                         exif_tags = exifread.process_file(
                             image_file, details=False,
+                            extract_thumbnail=False,
                             stop_tag='Image Orientation')
                         if 'Image Orientation' in exif_tags:
                             orientations = (exif_tags['Image Orientation']
@@ -159,7 +179,7 @@ class ImageListModel(QAbstractListModel):
             image = Image(image_path, dimensions, tags)
             self.images.append(image)
         self.images.sort(key=lambda image_: image_.path)
-        self.modelReset.emit()
+        self.endResetModel()
 
     def add_to_undo_stack(self, action_name: str,
                           should_ask_for_confirmation: bool):

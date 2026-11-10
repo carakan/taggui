@@ -17,6 +17,9 @@ def suppress_warnings():
     if environment == 'development':
         print('Running in development environment.')
         return
+    # The `exifread` module logs a warning for every image without Exif
+    # tags, which floods the log.
+    logging.getLogger('exifread').setLevel(logging.ERROR)
     logging.basicConfig(level=logging.ERROR)
     warnings.simplefilter('ignore')
 

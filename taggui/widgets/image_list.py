@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import (QFile, QItemSelection, QItemSelectionModel,
                             QItemSelectionRange, QModelIndex, QSize, QUrl, Qt,
                             Signal, Slot)
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QDrag, QPainter, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDockWidget,
                                QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                                QListView, QMenu, QMessageBox, QVBoxLayout,
@@ -110,6 +110,9 @@ class ImageListView(QListView):
         self.tag_separator = tag_separator
         self.setModel(proxy_image_list_model)
         self.setWordWrap(True)
+        # The images can be dragged out of the list, to open them in another
+        # application.
+        self.setDragEnabled(True)
         # If the actual height of the image is greater than 3 times the width,
         # the image will be scaled down to fit.
         self.setIconSize(QSize(image_width, image_width * 3))
@@ -319,6 +322,33 @@ class ImageListView(QListView):
         selected_images = self.get_selected_images()
         image_path = selected_images[0].path
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(image_path)))
+
+    def startDrag(self, supported_actions: Qt.DropAction):
+        """Drags the selected images out of the list.
+
+        The drag image is the thumbnail of the first selected image, so that
+        the drag does not show the caption text.
+        """
+        indexes = self.selectedIndexes()
+        if not indexes:
+            return
+        mime_data = self.model().mimeData(indexes)
+        if not mime_data:
+            return
+        icon = indexes[0].data(Qt.ItemDataRole.DecorationRole)
+        pixmap = icon.pixmap(self.iconSize())
+        # A transparent background makes the drag image easier to see.
+        drag_pixmap = QPixmap(pixmap.size())
+        drag_pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(drag_pixmap)
+        painter.setOpacity(0.7)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.setPixmap(drag_pixmap)
+        drag.setHotSpot(drag_pixmap.rect().center())
+        drag.exec(supported_actions)
 
     @Slot()
     def send_selected_images_to_tagger(self):

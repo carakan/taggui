@@ -38,9 +38,13 @@ class ProxyImageListModel(QSortFilterProxyModel):
             if filter_[0] == 'path':
                 return fnmatchcase(str(image.path), f'*{filter_[1]}*')
         if filter_[1] == 'AND':
+            if len(filter_) < 3:
+                return self.does_image_match_filter(image, filter_[0])
             return (self.does_image_match_filter(image, filter_[0])
                     and self.does_image_match_filter(image, filter_[2:]))
         if filter_[1] == 'OR':
+            if len(filter_) < 3:
+                return self.does_image_match_filter(image, filter_[0])
             return (self.does_image_match_filter(image, filter_[0])
                     or self.does_image_match_filter(image, filter_[2:]))
         comparison_operators = {
