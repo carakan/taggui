@@ -1,6 +1,47 @@
-from PySide6.QtWidgets import QCheckBox, QFrame, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel,
+                               QPushButton, QWidget)
 
 from utils.settings import DEFAULT_SETTINGS, get_settings
+
+
+def create_help_label(tooltip: str) -> QLabel:
+    """
+    A small "?" label that shows `tooltip` on hover, for appending next to
+    a setting's name to explain what it does.
+    """
+    help_label = QLabel('(?)')
+    help_label.setToolTip(tooltip)
+    help_label.setStyleSheet('color: palette(link);')
+    help_label.setCursor(Qt.CursorShape.WhatsThisCursor)
+    return help_label
+
+
+def label_with_help(text: str, tooltip: str) -> QWidget:
+    """
+    A form-row label: `text` followed by a help icon that shows `tooltip`
+    on hover.
+    """
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    layout.addWidget(QLabel(text))
+    layout.addWidget(create_help_label(tooltip))
+    return container
+
+
+def checkbox_with_help(check_box: QCheckBox, tooltip: str) -> QWidget:
+    """
+    A check box followed by a help icon that shows `tooltip` on hover.
+    """
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    layout.addWidget(check_box)
+    layout.addWidget(create_help_label(tooltip))
+    return container
 
 
 class BigPushButton(QPushButton):

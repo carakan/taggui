@@ -27,7 +27,8 @@ from tagging.tagger import (TagMode, TagOrder, Tagger, TaggerSettings,
                             modified_caption_files)
 from tagging.tagging_thread import TaggingThread
 from tagging.vocabulary import Vocabulary
-from utils.big_widgets import TallPushButton
+from utils.big_widgets import (TallPushButton, checkbox_with_help,
+                               label_with_help)
 from utils.settings_widgets import (FocusedScrollSettingsComboBox,
                                     FocusedScrollSettingsDoubleSpinBox,
                                     FocusedScrollSettingsSpinBox,
@@ -77,9 +78,23 @@ class LlmTaggerSettingsForm(QVBoxLayout):
         self.model_line_edit = SettingsLineEdit(key='llm_tagger_model',
                                                 default=DEFAULT_MODEL)
         self.model_line_edit.setClearButtonEnabled(True)
-        self.server_form.addRow('Server URL', self.base_url_line_edit)
-        self.server_form.addRow('API key', self.api_key_line_edit)
-        self.server_form.addRow('Model', self.model_line_edit)
+        self.server_form.addRow(
+            label_with_help(
+                'Server URL',
+                'The URL of the OpenAI-compatible vision model server, such '
+                'as a llama.cpp server running Pixtral.'),
+            self.base_url_line_edit)
+        self.server_form.addRow(
+            label_with_help(
+                'API key',
+                'The bearer token sent to the server. A server without '
+                'authentication ignores it.'),
+            self.api_key_line_edit)
+        self.server_form.addRow(
+            label_with_help(
+                'Model',
+                'The name of the model to use, as the server knows it.'),
+            self.model_line_edit)
         self.addLayout(self.server_form)
 
         self.tagging_form = QFormLayout()
@@ -113,15 +128,55 @@ class LlmTaggerSettingsForm(QVBoxLayout):
         self.timeout_spin_box = FocusedScrollSettingsSpinBox(
             key='llm_tagger_timeout', default=DEFAULT_TIMEOUT, minimum=1,
             maximum=3600)
-        self.tagging_form.addRow('Mode', self.mode_combo_box)
-        self.tagging_form.addRow('Tag order', self.order_combo_box)
-        self.tagging_form.addRow('Trigger word', self.trigger_line_edit)
-        self.tagging_form.addRow('Maximum tags', self.max_tags_spin_box)
-        self.tagging_form.addRow('Maximum tokens', self.max_tokens_spin_box)
-        self.tagging_form.addRow('Temperature', self.temperature_spin_box)
-        self.tagging_form.addRow('Repeat penalty',
-                                  self.repeat_penalty_spin_box)
-        self.tagging_form.addRow('Timeout (s)', self.timeout_spin_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Mode',
+                'How the generated tags are combined with the existing ones: '
+                'replaced, appended, kept as they are, and so on.'),
+            self.mode_combo_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Tag order',
+                'The order of the tags in the caption, such as by '
+                'frequency, alphabetically, or by the order the model '
+                'generated them.'),
+            self.order_combo_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Trigger word',
+                'The trigger word of the dataset. It is added to the '
+                'caption separately, so that the model does not have to '
+                'repeat it.'),
+            self.trigger_line_edit)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Maximum tags',
+                'The maximum number of tags to keep per image.'),
+            self.max_tags_spin_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Maximum tokens',
+                'The maximum number of tokens the model generates. Too low '
+                'can cut the tags off mid-list.'),
+            self.max_tokens_spin_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Temperature',
+                'How random the generation is. Lower is more focused, '
+                'higher is more random. 0 is the most deterministic.'),
+            self.temperature_spin_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Repeat penalty',
+                'Penalizes tokens that already appeared in the caption, to '
+                'discourage repetition. 1 disables this.'),
+            self.repeat_penalty_spin_box)
+        self.tagging_form.addRow(
+            label_with_help(
+                'Timeout (s)',
+                'How long to wait for the server to answer a single '
+                'image, in seconds.'),
+            self.timeout_spin_box)
         self.addLayout(self.tagging_form)
 
         self.options_form = QFormLayout()
@@ -148,14 +203,40 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             key='llm_tagger_idle_seconds', default=8, minimum=0, maximum=600)
         self.limit_spin_box = FocusedScrollSettingsSpinBox(
             key='llm_tagger_limit', default=0, minimum=0, maximum=99999)
-        self.options_form.addRow('Images', self.scope_combo_box)
-        self.options_form.addRow(self.skip_tagged_check_box)
-        self.options_form.addRow(self.resume_check_box)
-        self.options_form.addRow(self.preserve_vocab_check_box)
-        self.options_form.addRow(self.dry_run_check_box)
-        self.options_form.addRow('Idle pause (s)', self.idle_seconds_spin_box)
-        self.options_form.addRow('Image limit (0 = all)',
-                                  self.limit_spin_box)
+        self.options_form.addRow(
+            label_with_help(
+                'Images',
+                'Which images a run covers: the selected ones, the ones '
+                'that pass the filter, or all of them.'),
+            self.scope_combo_box)
+        self.options_form.addRow(checkbox_with_help(
+            self.skip_tagged_check_box,
+            'Skip the images that already have tags, so that only the '
+            'untagged ones are tagged.'))
+        self.options_form.addRow(checkbox_with_help(
+            self.resume_check_box,
+            'Skip the captions that are not changed in git, to continue a '
+            'run that was interrupted.'))
+        self.options_form.addRow(checkbox_with_help(
+            self.preserve_vocab_check_box,
+            'Keep the local words that the model does not know, when the '
+            'tags are pruned.'))
+        self.options_form.addRow(checkbox_with_help(
+            self.dry_run_check_box,
+            'Show what would be written to the caption files, without '
+            'writing anything.'))
+        self.options_form.addRow(
+            label_with_help(
+                'Idle pause (s)',
+                'How long to wait after every few images, to let the '
+                'server cool down.'),
+            self.idle_seconds_spin_box)
+        self.options_form.addRow(
+            label_with_help(
+                'Image limit (0 = all)',
+                'The maximum number of images to tag in a run. 0 tags all '
+                'of them.'),
+            self.limit_spin_box)
         self.addLayout(self.options_form)
 
         self.vocabulary_form = QFormLayout()
@@ -165,7 +246,12 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         self.vocabulary_path_label = QLabel()
         self.vocabulary_path_label.setWordWrap(True)
-        self.vocabulary_form.addRow('Vocabulary', self.vocabulary_path_label)
+        self.vocabulary_form.addRow(
+            label_with_help(
+                'Vocabulary',
+                'The words that the dataset uses. The model is asked to '
+                'use them instead of inventing its own.'),
+            self.vocabulary_path_label)
         self.addLayout(self.vocabulary_form)
         self.addStretch()
 

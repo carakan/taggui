@@ -47,6 +47,27 @@ images.
 Any changes you make to the tags are also automatically saved to these `.txt`
 files.
 
+### Settings
+
+`File` -> `Settings` holds the settings of the application:
+
+- `Font size (pt)`: The size of the text of the interface.
+- `UI scale (%)`: Scales the whole interface - fonts, icons, spacing, and
+  widget sizes - from 50% to 300%. Like the font size, it takes effect on
+  restart, since Qt reads the scale only at startup.
+- `File types to show in image list`: The image formats to load, separated
+  by commas.
+- `Image width in image list (px)`: The width of the thumbnails.
+- `Tag separator`: The character that separates the tags in the `.txt`
+  files. Use `\n` for a newline.
+- `Insert space after tag separator`: Whether to add a space after the
+  separator when writing the captions.
+- `Show tag autocomplete suggestions`: Whether the tag box suggests the
+  tags you use the most.
+
+Every setting of the `AI Tagger` pane also has a `(?)` label next to it,
+which explains what it does when you hover over it.
+
 ## AI Tagging
 
 <img src='images/auto-captioner-v1.18.0.png' alt='AI tagger screenshot' width='100%'>
