@@ -227,30 +227,46 @@ def filter_tags(tags: list[str], prompt: str, whitelist: set[str],
     Drops prompt echoes, invented origin labels, quality/meta tags, bare
     color words and underscores. Returns the surviving tags.
     """
+    kept, _ = filter_tags_detailed(tags, prompt, whitelist, preserve)
+    return kept
+
+
+def filter_tags_detailed(
+        tags: list[str], prompt: str, whitelist: set[str],
+        preserve: set[str]) -> tuple[list[str], list[tuple[str, list[str]]]]:
+    """Applies the house filters and reports the tags dropped by each stage.
+
+    Returns the surviving tags and the (stage label, dropped tags) pairs,
+    in the order the stages run.
+    """
     # The protected vocabulary is allowed to echo the prompt text and to
     # keep its origin label.
     allowed = whitelist | preserve
+    stages = [
+        ('prompt-echo guard (tag text already in the prompt, unless'
+         ' whitelisted / color-garment)',
+         lambda tag: (tag not in prompt.lower() or tag in allowed
+                      or is_color_garment_tag(tag))),
+        ('origin-tag rule',
+         lambda tag: tag in preserve or not ORIGIN_TAG_RE.match(tag)),
+        ('quality-tag rule', lambda tag: not QUALITY_TAG_RE.match(tag)),
+        ('bare color word',
+         lambda tag: not BARE_COLOR_RE.match(tag) or tag in allowed),
+        ('bare color chain (re-attached to a garment in merge)',
+         lambda tag: not is_bare_color_chain(tag)),
+        ('underscore', lambda tag: '_' not in tag),
+    ]
+    remaining = list(tags)
+    drops: list[tuple[str, list[str]]] = []
+    for label, keep in stages:
+        dropped = [tag for tag in remaining if not keep(tag)]
+        if dropped:
+            drops.append((label, dropped))
+        remaining = [tag for tag in remaining if keep(tag)]
+    return remaining, drops
 
-    def keep(tag: str) -> bool:
-        if not (tag not in prompt.lower() or tag in allowed
-                or is_color_garment_tag(tag)):
-            return False
-        if not (tag in preserve or not ORIGIN_TAG_RE.match(tag)):
-            return False
-        if QUALITY_TAG_RE.match(tag):
-            return False
-        if not (not BARE_COLOR_RE.match(tag) or tag in allowed):
-            return False
-        if is_bare_color_chain(tag):
-            return False
-        if '_' in tag:
-            return False
-        return True
 
-    return [tag for tag in tags if keep(tag)]
-
-
-def merge_tags(trigger: str, new: list[str], existing: list[str],
+def merge_tags(trigger: str, new: list, existing: list[str],
                ignore: set[str], prune: bool) -> list[str]:
     """Merges the model response with the existing caption.
 
@@ -258,18 +274,49 @@ def merge_tags(trigger: str, new: list[str], existing: list[str],
     the image). Otherwise the existing tags are kept, except the ones in
     the ignore list and a count tag that the response replaced.
     """
+    merged, _ = merge_tags_detailed(trigger, new, existing, ignore, prune)
+    return merged
+
+
+def merge_tags_detailed(
+        trigger: str, new: list, existing: list[str], ignore: set[str],
+        prune: bool) -> tuple[list[str], dict[str, list[str]]]:
+    """Merges the model response with the existing caption.
+
+    Returns the merged tags and the accounting of what was kept and what
+    was dropped, for the audit log.
+    """
     merged = [t for t in new if t not in ignore]
+    accounting: dict[str, list[str]] = {
+        'dropped by .ignoretags': [t for t in new if t in ignore],
+    }
     if not prune:
         has_count_tag = any(PERSON_COUNT_RE.match(t) for t in merged)
+        kept_existing, drop_ignore, drop_count, drop_dup = [], [], [], []
         for tag in existing:
             if has_count_tag and PERSON_COUNT_RE.match(tag):
+                drop_count.append(tag)
                 continue
             if tag in ignore:
+                drop_ignore.append(tag)
                 continue
             if tag != trigger and tag not in merged:
                 merged.append(tag)
+                kept_existing.append(tag)
+            elif tag in merged:
+                drop_dup.append(tag)
+        accounting['kept existing'] = kept_existing
+        accounting['existing dropped by .ignoretags'] = drop_ignore
+        accounting['existing dropped (count tag replaced by response)'] = (
+            drop_count)
+        accounting['existing already in response (dup)'] = drop_dup
     merged = [t for t in merged if t != trigger]
-    return normalize_color_order(attach_color_chains(merged))
+    pre_normalize = list(merged)
+    merged = normalize_color_order(attach_color_chains(merged))
+    accounting['lost folding color chains / reordering'] = [
+        tag for tag in pre_normalize if tag not in merged]
+    accounting['merged result'] = merged
+    return merged, accounting
 
 
 def order_tags(trigger: str, body: list[str], order: str,

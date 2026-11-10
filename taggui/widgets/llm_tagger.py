@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QDockWidget, QFormLayout,
                                QFrame, QLabel, QMessageBox, QPlainTextEdit,
                                QProgressBar, QScrollArea, QVBoxLayout, QWidget)
 
+from dialogs.audit_log_dialog import AuditLogDialog
 from dialogs.prompt_template_dialog import (PromptTemplateDialog,
                                              get_prompt_template)
 from dialogs.vocabulary_dialog import VocabularyDialog
 from models.image_list_model import ImageListModel
+from tagging.audit import AuditLog
 from tagging.client import (DEFAULT_API_KEY, DEFAULT_BASE_URL, DEFAULT_MAX_TOKENS,
                             DEFAULT_MODEL, DEFAULT_REPEAT_PENALTY,
                             DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT, LlmClient)
@@ -199,6 +201,9 @@ class LlmTaggerSettingsForm(QVBoxLayout):
         self.dry_run_check_box = SettingsBigCheckBox(
             key='llm_tagger_dry_run', default=False,
             text='Dry run (do not write captions)')
+        self.audit_log_check_box = SettingsBigCheckBox(
+            key='llm_tagger_audit_log', default=False,
+            text='Write an audit log')
         self.idle_seconds_spin_box = FocusedScrollSettingsSpinBox(
             key='llm_tagger_idle_seconds', default=8, minimum=0, maximum=600)
         self.limit_spin_box = FocusedScrollSettingsSpinBox(
@@ -225,6 +230,11 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             self.dry_run_check_box,
             'Show what would be written to the caption files, without '
             'writing anything.'))
+        self.options_form.addRow(checkbox_with_help(
+            self.audit_log_check_box,
+            'Keep a detailed log of the run — the prompt sent to the '
+            'model, the raw and parsed response, every filter stage and '
+            'the merge decisions — and show it when the run is over.'))
         self.options_form.addRow(
             label_with_help(
                 'Idle pause (s)',
@@ -342,6 +352,15 @@ class LlmTagger(QDockWidget):
         self.settings_form.vocabulary_path_label.setText(
             f'{directory_path}<br>{global_count} global ignore tag(s), '
             f'{section_count} section tag(s), {base_count} base tag(s)')
+
+    @Slot()
+    def show_audit_log_dialog(self, audit: AuditLog | None):
+        """Shows the audit log of the finished run."""
+        if audit is None:
+            return
+        dialog = AuditLogDialog(parent=self, audit=audit,
+                                directory=self.directory_path)
+        dialog.exec()
 
     @Slot()
     def show_prompt_template_dialog(self):
@@ -476,13 +495,17 @@ class LlmTagger(QDockWidget):
         dataset_root = self.get_dataset_root(image_indices)
         vocabulary = Vocabulary(dataset_root)
         counts = self.get_tag_counts()
-        tagger = Tagger(client, vocabulary, settings, counts)
+        audit = (AuditLog()
+                 if self.settings_form.audit_log_check_box.isChecked()
+                 else None)
+        tagger = Tagger(client, vocabulary, settings, counts, audit)
         self.set_is_tagging(True)
         self.progress_bar.setRange(0, len(image_indices))
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.tagging_thread = TaggingThread(
-            self, self.image_list_model, image_indices, tagger, settings)
+            self, self.image_list_model, image_indices, tagger, settings,
+            audit)
         self.tagging_thread.text_outputted.connect(
             self.update_console_text_edit)
         self.tagging_thread.clear_console_text_edit_requested.connect(
@@ -494,6 +517,8 @@ class LlmTagger(QDockWidget):
             lambda *_: self.set_is_tagging(False))
         self.tagging_thread.run_finished.connect(
             lambda *_: self.progress_bar.hide())
+        self.tagging_thread.run_finished.connect(
+            lambda *_: self.show_audit_log_dialog(audit))
         self.tagging_thread.finished.connect(restore_stdout_and_stderr)
         self.tagging_thread.finished.connect(
             lambda: self.start_cancel_button.setEnabled(True))

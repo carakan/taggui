@@ -473,6 +473,13 @@ class MainWindow(QMainWindow):
         self.llm_tagger.raise_()
         self.llm_tagger.start_tagging_images(image_indices)
 
+    def set_audit_log_enabled(self, enabled: bool):
+        """Enables the audit log of the tagging runs.
+
+        The `--logs` command line option turns it on.
+        """
+        self.llm_tagger.settings_form.audit_log_check_box.setChecked(enabled)
+
     @Slot()
     def schedule_utilities_refresh(self):
         """Updates the utilities panel after the current change."""

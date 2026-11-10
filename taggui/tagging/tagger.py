@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from tagging.audit import AuditLog
 from tagging.client import LlmClient, LlmError
 from tagging.prompt import build_prompt
-from tagging.rules import (PROMPT_WHITELIST, clean_tag_list, filter_tags,
-                           is_degenerate, merge_tags, order_tags)
+from tagging.rules import (PROMPT_WHITELIST, clean_tag_list,
+                           filter_tags_detailed, is_degenerate,
+                           merge_tags_detailed, order_tags)
 from tagging.vocabulary import Vocabulary
 
 
@@ -66,6 +68,8 @@ class TagResult:
     error: str = ''
     # Tags that were dropped while merging, for the run log.
     dropped: list[str] = field(default_factory=list)
+    # The number of tags the caption had before the run.
+    old_tag_count: int = 0
 
 
 def git_modified_txt(root: Path) -> set[str]:
@@ -111,11 +115,14 @@ class Tagger:
 
     def __init__(self, client: LlmClient, vocabulary: Vocabulary,
                  settings: TaggerSettings | None = None,
-                 counts: dict[str, int] | None = None):
+                 counts: dict[str, int] | None = None,
+                 audit: AuditLog | None = None):
         self.client = client
         self.vocabulary = vocabulary
         self.settings = settings or TaggerSettings()
         self.counts = counts if counts is not None else {}
+        # The audit log of the run, like the `--logs` option of the script.
+        self.audit = audit
 
     def get_trigger(self, image_path: Path, existing_tags: list[str]) -> str:
         if self.settings.trigger:
@@ -168,16 +175,49 @@ class Tagger:
             except LlmError as exception:
                 error = str(exception)
                 return [], raw, error
+            if self.audit is not None:
+                self.audit.write(f'  RESPONSE (attempt {attempt + 1},'
+                                 f' finish_reason={finish_reason})')
+                for line in raw.splitlines():
+                    self.audit.write(f'      | {line}')
             tags = clean_tag_list(raw, word_cap=3)
+            if self.audit is not None:
+                self.audit.write(f'    parsed by clean_tag_list (dedupe,'
+                                 f' role words, word-cap 3, count rules)'
+                                 f' ({len(tags)}): '
+                                 f'{", ".join(tags) or "(none)"}')
             if finish_reason == 'length' and tags:
                 # The response was cut off; the last tag may be truncated.
+                cut = tags[-1]
                 tags = tags[:-1]
-            tags = filter_tags(tags, prompt, whitelist, preserve)
+                if self.audit is not None:
+                    self.audit.write(f'    finish_reason=length: dropped'
+                                     f' last tag \'{cut}\'')
+            tags, drops = filter_tags_detailed(tags, prompt, whitelist,
+                                                preserve)
+            if self.audit is not None:
+                for label, dropped in drops:
+                    self.audit.write(f'    filter \'{label}\': dropped'
+                                     f' ({len(dropped)}): '
+                                     f'{", ".join(dropped)}')
             if len(tags) > self.settings.max_tags:
+                cut = tags[self.settings.max_tags:]
                 tags = tags[:self.settings.max_tags]
+                if self.audit is not None:
+                    self.audit.write(f'    max-tags cap'
+                                     f' {self.settings.max_tags}: dropped'
+                                     f' ({len(cut)}): {", ".join(cut)}')
+            if self.audit is not None:
+                self.audit.write(f'    after filters ({len(tags)}): '
+                                 f'{", ".join(tags) or "(none)"}')
             if tags and not is_degenerate(tags):
                 return tags, raw, ''
             error = 'empty or degenerate response from model'
+            if self.audit is not None:
+                outcome = ('retry' if attempt == 0
+                           else 'give up, old .txt stays')
+                self.audit.write('    degenerate response (over-long or one'
+                                 f' word dominating) -> {outcome}')
         return [], raw, error
 
     def tag_image(self, image_path: Path,
@@ -196,6 +236,23 @@ class Tagger:
                     if prune else [])
         prompt = self.build_prompt(image_path, existing_tags, trigger,
                                    basetags, anchors, preserve)
+        if self.audit is not None:
+            self.write_image_audit_header(image_path, meta, existing_tags,
+                                           trigger, prune)
+            self.audit.write(f'  REQUEST ({self.client.model} @ '
+                             f'{self.client.base_url})')
+            self.audit.write('    prompt sent (full, incl. all hint lines):')
+            for line in prompt.splitlines():
+                self.audit.write(f'      | {line}')
+            if basetags:
+                self.audit.write(f'    basetags in prompt ({len(basetags)}): '
+                                 f'{", ".join(basetags)}')
+            if anchors:
+                self.audit.write(f'    anchors in prompt ({len(anchors)}): '
+                                 f'{", ".join(anchors)}')
+            if prune and preserve:
+                self.audit.write(f'    preserve terms in prompt '
+                                 f'({len(preserve)}): {", ".join(preserve)}')
         # Tags that are allowed to echo the prompt text: the vocabulary
         # lists and the count/framing tags the prompt itself mentions.
         whitelist = (set(PROMPT_WHITELIST) | set(basetags) | set(anchors)
@@ -203,11 +260,67 @@ class Tagger:
         tags, raw, error = self.request_tags(prompt, image_path, whitelist,
                                              set(preserve))
         if error:
+            if self.audit is not None:
+                self.audit.write(f'  RESULT: FAILED — {error}')
+                self.audit.write()
             return TagResult(raw_response=raw, prompt=prompt, is_success=False,
-                             error=error)
-        merged = merge_tags(trigger, tags, existing_tags, ignore, prune)
+                             error=error, old_tag_count=len(existing_tags))
+        merged, accounting = merge_tags_detailed(trigger, tags, existing_tags,
+                                                 ignore, prune)
+        if self.audit is not None:
+            merge_mode = ('new-only, prune mode' if prune
+                          else 'new + kept existing')
+            self.audit.write(f'  MERGE ({merge_mode})')
+            for label, items in accounting.items():
+                self.audit.write_list(label, items)
         order = ('alpha' if self.settings.order == TagOrder.ALPHA else 'rank')
         final = order_tags(trigger, merged, order, self.counts)
         dropped = [tag for tag in existing_tags if tag not in final]
+        if self.audit is not None:
+            self.audit.write(f'  FINAL ORDER ({order}): {", ".join(final)}')
+            result = ('DRY-RUN — not written' if self.settings.dry_run
+                      else 'WRITTEN')
+            caption_file_name = image_path.with_suffix('.txt').name
+            self.audit.write(f'  RESULT: {result} to {caption_file_name}')
+            self.audit.write(f'  OLD ({len(existing_tags)}): '
+                             f'{", ".join(existing_tags) or "(none)"}')
+            self.audit.write(f'  NEW ({len(final)}): {", ".join(final)}')
+            self.audit.write()
         return TagResult(tags=final, raw_response=raw, prompt=prompt,
-                         is_success=True, dropped=dropped)
+                         is_success=True, dropped=dropped,
+                         old_tag_count=len(existing_tags))
+
+    def write_image_audit_header(self, image_path: Path, meta: dict,
+                                 existing_tags: list[str], trigger: str,
+                                 prune: bool):
+        """The audit header of one image: its vocabulary and its tags."""
+        self.audit.header(f'AUDIT {image_path}')
+        mode = 'prune' if prune else 'retag'
+        if self.settings.dry_run:
+            mode += ' | DRY-RUN (nothing written)'
+        self.audit.write(f'  mode: {mode}')
+        self.audit.write(f'  trigger: {trigger}')
+        self.audit.write(f'  existing tags ({len(existing_tags)}): '
+                         f'{", ".join(existing_tags) or "(none)"}')
+        folder_basetags = meta['folder_basetags']
+        root_basetags = meta['root_basetags']
+        basetags = meta['basetags']
+        self.audit.write(f'  basetags sent as vocabulary: '
+                         f'{len(folder_basetags)} folder'
+                         f' + {len(root_basetags)} root = {len(basetags)}')
+        self.audit.write(f'    folder .basetags: '
+                         f'{", ".join(folder_basetags) or "(none)"}')
+        self.audit.write(f'    root .basetags: '
+                         f'{", ".join(root_basetags) or "(none)"}')
+        global_ignore = meta['global_ignore']
+        section_ignore = meta['section_ignore']
+        file_ignore = meta['file_ignore']
+        ignore = meta['ignore']
+        self.audit.write(f'  ignore vocabulary: {len(global_ignore)} global'
+                         f' + {len(section_ignore)} section'
+                         f' + {len(file_ignore)} file = {len(ignore)}')
+        self.audit.write(f'    global: '
+                         f'{", ".join(global_ignore) or "(none)"}')
+        self.audit.write(f'    section: '
+                         f'{", ".join(section_ignore) or "(none)"}')
+        self.audit.write(f'    file: {", ".join(file_ignore) or "(none)"}')

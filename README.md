@@ -144,7 +144,32 @@ The dataset root must be a git repository.
 `Dry run (do not write captions)`: Print the new captions in the console
 without writing them.
 
+`Write an audit log`: Keep a detailed log of the run, and show it when the
+run is over.
+See [The audit log](#the-audit-log).
+
 `Image limit (0 = all)`: Tag at most this many images.
+
+### The audit log
+
+The audit log is the equivalent of the `--logs` option of the reference
+tagging script.
+It records, for every image, the full prompt that was sent to the model,
+the raw and the parsed response, every filter stage with the tags it
+dropped, the merge decisions and the final caption.
+The summary of the run is at the end.
+
+Turn on `Write an audit log` in the `AI Tagger` pane, or start the
+application with the `--logs` option:
+
+```bash
+python taggui/run_gui.py --logs
+```
+
+The log is shown in a dialog when the run is over, and it can be copied to
+the clipboard or saved to a file from that dialog.
+The file is written in the same format as the `lora_tagger_<stamp>.log`
+file of the script.
 
 ### The prompt template
 
