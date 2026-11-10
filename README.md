@@ -16,6 +16,7 @@ models.
 - AI tagging with a local vision language model
 - Batch tag operations for renaming, deleting, and sorting tags
 - Advanced image list filtering
+- Drag images out of the list to open them in another application
 
 ## Installation
 
@@ -289,6 +290,8 @@ You can nest parentheses and operators to create arbitrarily complex filters.
 - Right-clicking on an image will bring up the context menu, which includes
   actions such as copying and pasting tags and moving or copying selected
   images to another directory.
+- Dragging the selected images out of the list opens them in another
+  application.
 
 ### Image Tags pane
 
