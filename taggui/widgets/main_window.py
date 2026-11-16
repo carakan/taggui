@@ -1,8 +1,9 @@
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QKeyCombination, QModelIndex, QTimer, QUrl, Qt, Slot
 from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QIcon,
-                           QKeySequence, QPixmap, QShortcut)
+                           QKeySequence, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow,
                                QMessageBox, QStackedWidget, QVBoxLayout,
                                QWidget)
@@ -30,7 +31,12 @@ from widgets.image_viewer import ImageViewer
 from widgets.llm_tagger import LlmTagger, TagScope
 from widgets.utilities import Utilities
 
-ICON_PATH = Path('images/icon.ico')
+# The window icon. macOS reads the `.icns` file, the other platforms the
+# `.ico` file.
+if sys.platform == 'darwin':
+    ICON_PATH = Path('images/icon.icns')
+else:
+    ICON_PATH = Path('images/icon.ico')
 GITHUB_REPOSITORY_URL = 'https://github.com/jhc13/taggui'
 # The number of selected images shown in the overlay on the large image.
 MAX_OVERLAY_IMAGES = 12
@@ -58,7 +64,7 @@ class MainWindow(QMainWindow):
         self.tag_counter_model = TagCounterModel()
         self.image_tag_list_model = ImageTagListModel()
 
-        self.setWindowIcon(QIcon(QPixmap(get_resource_path(ICON_PATH))))
+        self.setWindowIcon(QIcon(str(get_resource_path(ICON_PATH))))
         # Not setting this results in some ugly colors.
         self.setPalette(self.app.style().standardPalette())
         # The font size must be set before creating the widgets to ensure that

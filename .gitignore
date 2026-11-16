@@ -21,6 +21,9 @@ sdist/
 var/
 wheels/
 share/python-wheels/
+# The intermediate icon set of the macOS build. The `.icns` file it is
+# assembled into is kept.
+images/icon.iconset/
 *.egg-info/
 .installed.cfg
 *.egg
