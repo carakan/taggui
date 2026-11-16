@@ -78,9 +78,11 @@ which explains what it does when you hover over it.
 <img src='images/auto-captioner-v1.18.0.png' alt='AI tagger screenshot' width='100%'>
 
 In addition to manual tagging, TagGUI can generate the tags of your images
-with a local vision language model.
+with a vision language model.
 The model runs on your own machine, behind an OpenAI-compatible HTTP API,
 so no data leaves the computer and no GPU support is needed inside TagGUI.
+The hosted providers — OpenAI, Anthropic and Google — can be used from the
+same pane when you prefer them.
 
 The reference setup is a [llama.cpp](https://github.com/ggml-org/llama.cpp)
 server running a vision model such as Pixtral:
@@ -118,10 +120,28 @@ images, so that only they are tagged.
 
 ### Tagging parameters
 
+`Provider`: The service the model runs on.
+The local llama.cpp server is the default, and nothing leaves the computer.
+The hosted providers are picked from the same list:
+
+| Provider | Server URL | Model | Key |
+|---|---|---|---|
+| `Local (llama.cpp)` | `http://127.0.0.1:8080/v1` | `pixtral` | `LLAMACPP_API_KEY` |
+| `OpenAI (GPT)` | `https://api.openai.com/v1` | `gpt-5.2` | `OPENAI_API_KEY` |
+| `Anthropic (Claude)` | `https://api.anthropic.com/v1` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| `Google (Gemini)` | `https://generativelanguage.googleapis.com/v1beta` | `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| `OpenAI-compatible` | yours | yours | yours |
+
+The last one is for every service that speaks the OpenAI API: Groq,
+Mistral, DeepSeek, OpenRouter, Together, Fireworks, Ollama, LM Studio and
+vLLM. Give it the URL, the model name and the key of the service.
+
 `Server URL`, `API key`, `Model`: How to reach the model server.
+Picking a provider brings its URL, its model and its key; the fields can
+then be changed, and every provider keeps its own.
 The API key is only sent to the server as a bearer token; a server without
 authentication accepts any value.
-The key is read from the `LLAMACPP_API_KEY` environment variable by default,
+The key is read from the environment variable of the provider by default,
 and it can also be typed in the pane, where it is remembered.
 
 `Trigger word`: The trigger word of the dataset.

@@ -13,8 +13,9 @@ from pathlib import Path
 from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
 from PySide6.QtGui import QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (QAbstractScrollArea, QDockWidget, QFormLayout,
-                               QFrame, QLabel, QMessageBox, QPlainTextEdit,
-                               QProgressBar, QScrollArea, QVBoxLayout, QWidget)
+                               QFrame, QLabel, QLineEdit, QMessageBox,
+                               QPlainTextEdit, QProgressBar, QScrollArea,
+                               QVBoxLayout, QWidget)
 
 from dialogs.audit_log_dialog import AuditLogDialog
 from dialogs.prompt_template_dialog import (PromptTemplateDialog,
@@ -22,15 +23,17 @@ from dialogs.prompt_template_dialog import (PromptTemplateDialog,
 from dialogs.vocabulary_dialog import VocabularyDialog
 from models.image_list_model import ImageListModel
 from tagging.audit import AuditLog
-from tagging.client import (DEFAULT_API_KEY, DEFAULT_BASE_URL, DEFAULT_MAX_TOKENS,
-                            DEFAULT_MODEL, DEFAULT_REPEAT_PENALTY,
-                            DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT, LlmClient)
+from tagging.client import (DEFAULT_MAX_TOKENS, DEFAULT_REPEAT_PENALTY,
+                            DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT,
+                            PROVIDER_PRESETS, Provider, create_client,
+                            provider_api_key)
 from tagging.tagger import (TagMode, TagOrder, Tagger, TaggerSettings,
                             modified_caption_files)
 from tagging.tagging_thread import TaggingThread
 from tagging.vocabulary import Vocabulary, find_dataset_root
 from utils.big_widgets import (TallPushButton, checkbox_with_help,
                                label_with_help)
+from utils.settings import get_settings
 from utils.settings_widgets import (FocusedScrollSettingsComboBox,
                                     FocusedScrollSettingsDoubleSpinBox,
                                     FocusedScrollSettingsSpinBox,
@@ -69,27 +72,36 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             QFormLayout.RowWrapPolicy.WrapAllRows)
         self.server_form.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        self.base_url_line_edit = SettingsLineEdit(key='llm_tagger_base_url',
-                                                   default=DEFAULT_BASE_URL)
+        self.provider_combo_box = FocusedScrollSettingsComboBox(
+            key='llm_tagger_provider')
+        self.provider_combo_box.addItems(list(Provider))
+        # The URL, the key and the model belong to the provider, so they
+        # are kept apart: every provider has its own.
+        self.base_url_line_edit = QLineEdit()
         self.base_url_line_edit.setClearButtonEnabled(True)
-        self.api_key_line_edit = SettingsLineEdit(key='llm_tagger_api_key',
-                                                  default=DEFAULT_API_KEY)
+        self.api_key_line_edit = QLineEdit()
         self.api_key_line_edit.setClearButtonEnabled(True)
         self.api_key_line_edit.setEchoMode(
             self.api_key_line_edit.EchoMode.Password)
-        self.model_line_edit = SettingsLineEdit(key='llm_tagger_model',
-                                                default=DEFAULT_MODEL)
+        self.model_line_edit = QLineEdit()
         self.model_line_edit.setClearButtonEnabled(True)
         self.server_form.addRow(
             label_with_help(
+                'Provider',
+                'The service the model runs on. The local llama.cpp server '
+                'is the default; the hosted providers need an API key.'),
+            self.provider_combo_box)
+        self.server_form.addRow(
+            label_with_help(
                 'Server URL',
-                'The URL of the OpenAI-compatible vision model server, such '
-                'as a llama.cpp server running Pixtral.'),
+                'The URL of the model server. The provider sets it; change '
+                'it for a server of your own.'),
             self.base_url_line_edit)
         self.server_form.addRow(
             label_with_help(
                 'API key',
-                'The bearer token sent to the server. A server without '
+                'The key sent to the server. It is read from the '
+                'environment variable of the provider, and a server without '
                 'authentication ignores it.'),
             self.api_key_line_edit)
         self.server_form.addRow(
@@ -171,7 +183,9 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             label_with_help(
                 'Repeat penalty',
                 'Penalizes tokens that already appeared in the caption, to '
-                'discourage repetition. 1 disables this.'),
+                'discourage repetition. 1 disables this. Only the local '
+                'llama.cpp server takes it; the other providers do not '
+                'know the parameter.'),
             self.repeat_penalty_spin_box)
         self.tagging_form.addRow(
             label_with_help(
@@ -264,6 +278,17 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             self.vocabulary_path_label)
         self.addLayout(self.vocabulary_form)
         self.addStretch()
+        # The provider decides which fields are filled in, and it is set
+        # up last, so that every widget of the form exists.
+        self._migrate_legacy_settings()
+        self._provider = Provider(self.provider_combo_box.currentText())
+        self._load_provider_fields(self._provider)
+        # The repeat penalty is a llama.cpp parameter. The other providers
+        # do not know it, so the field is off for them.
+        self.repeat_penalty_spin_box.setEnabled(
+            self._provider is Provider.LOCAL)
+        self.provider_combo_box.currentTextChanged.connect(
+            self._on_provider_changed)
 
     def get_tagger_settings(self) -> TaggerSettings:
         mode = TagMode(self.mode_combo_box.currentText())
@@ -285,6 +310,60 @@ class LlmTaggerSettingsForm(QVBoxLayout):
             limit=self.limit_spin_box.value(),
             idle_every=3,
             idle_seconds=self.idle_seconds_spin_box.value())
+
+    def get_provider(self) -> Provider:
+        """The provider that is selected."""
+        return self._provider
+
+    def _field_key(self, field: str, provider: Provider) -> str:
+        """The settings key of a field of a provider."""
+        return f'llm_tagger_{field}_{provider.name.lower()}'
+
+    def _migrate_legacy_settings(self):
+        """The first version had one set of fields for every provider.
+
+        They become the fields of the local provider.
+        """
+        settings = get_settings()
+        for field, legacy in (('base_url', 'llm_tagger_base_url'),
+                              ('model', 'llm_tagger_model'),
+                              ('api_key', 'llm_tagger_api_key')):
+            key = self._field_key(field, Provider.LOCAL)
+            if not settings.contains(key) and settings.contains(legacy):
+                settings.setValue(key, settings.value(legacy, type=str))
+
+    def _load_provider_fields(self, provider: Provider):
+        """Fills the fields with the ones of the provider."""
+        preset = PROVIDER_PRESETS[provider]
+        settings = get_settings()
+        self.base_url_line_edit.setText(settings.value(
+            self._field_key('base_url', provider), preset.base_url, type=str))
+        self.model_line_edit.setText(settings.value(
+            self._field_key('model', provider), preset.model, type=str))
+        self.api_key_line_edit.setText(settings.value(
+            self._field_key('api_key', provider), provider_api_key(provider),
+            type=str))
+
+    def _save_provider_fields(self, provider: Provider):
+        """Saves the fields of the provider."""
+        settings = get_settings()
+        settings.setValue(self._field_key('base_url', provider),
+                          self.base_url_line_edit.text())
+        settings.setValue(self._field_key('model', provider),
+                          self.model_line_edit.text())
+        settings.setValue(self._field_key('api_key', provider),
+                          self.api_key_line_edit.text())
+
+    def _on_provider_changed(self, text: str):
+        """Saves the fields of the provider that is left and brings in the
+        ones of the provider that is picked."""
+        provider = Provider(text)
+        self._save_provider_fields(self._provider)
+        self._provider = provider
+        self._load_provider_fields(provider)
+        # The repeat penalty is a llama.cpp parameter. The other providers
+        # do not know it, so the field is off for them.
+        self.repeat_penalty_spin_box.setEnabled(provider is Provider.LOCAL)
 
 
 class LlmTagger(QDockWidget):
@@ -478,7 +557,8 @@ class LlmTagger(QDockWidget):
                 self, 'No Images',
                 'Every image in the current scope already has tags.')
             return
-        client = LlmClient(
+        client = create_client(
+            provider=self.settings_form.get_provider(),
             base_url=self.settings_form.base_url_line_edit.text().strip(),
             api_key=self.settings_form.api_key_line_edit.text().strip(),
             model=self.settings_form.model_line_edit.text().strip(),
