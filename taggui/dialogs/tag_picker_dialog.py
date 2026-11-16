@@ -1,8 +1,9 @@
-"""A dialog for picking tags out of the tags of a dataset.
+"""A dialog for picking tags out of a list of tags.
 
-The dialog shows the tags of a dataset folder with a checkbox for each of
-them, so that a set of tags can be chosen with the mouse. It is the GUI
-counterpart of the interactive tag pickers of `lora_tagger.py`.
+The dialog shows a list of tags with a checkbox for each of them, so that
+a set of tags can be chosen with the mouse. It is the GUI counterpart of
+the interactive tag pickers of `lora_tagger.py`, and it is used both to
+add tags to the vocabulary of a dataset and to remove tags from it.
 """
 
 from PySide6.QtCore import Qt
@@ -12,24 +13,30 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
 
 # The role that holds the tag of a list item.
 TAG_ROLE = Qt.ItemDataRole.UserRole
+# The role that holds the detail of a list item, the text that tells where
+# the tag comes from.
+DETAIL_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class TagPickerDialog(QDialog):
-    """Lets the user pick tags out of a ranked list of tags.
+    """Lets the user pick tags out of a list of tags.
 
-    The tags are shown with the number of images they appear in, most
-    frequent first. A tag that is already stored is shown checked and
+    Every item is a (tag, detail) pair. The detail is shown next to the
+    tag, in parentheses. A tag that is already stored is shown checked and
     disabled, so that the state of the list is visible.
     """
 
     def __init__(self, parent, title: str, description: str,
-                 items: list[tuple[str, int]],
-                 stored_tags: set[str] | None = None):
+                 items: list[tuple[str, str]],
+                 stored_tags: set[str] | None = None,
+                 accept_text: str = 'OK',
+                 detail_labels: dict[str, str] | None = None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(560, 620)
         self.items = items
         self.stored_tags = stored_tags or set()
+        self.detail_labels = detail_labels or {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
@@ -64,6 +71,8 @@ class TagPickerDialog(QDialog):
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel)
+        button_box.button(QDialogButtonBox.StandardButton.Ok).setText(
+            accept_text)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -74,9 +83,11 @@ class TagPickerDialog(QDialog):
     def populate(self):
         """Fills the list with the tags."""
         self.tag_list.clear()
-        for tag, count in self.items:
-            item = QListWidgetItem(f'{tag}  ({count})')
+        for tag, detail in self.items:
+            label = self.detail_labels.get(detail, detail)
+            item = QListWidgetItem(f'{tag}  ({label})')
             item.setData(TAG_ROLE, tag)
+            item.setData(DETAIL_ROLE, detail)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             if tag in self.stored_tags:
                 # A tag that is already stored is shown checked and cannot
@@ -114,17 +125,23 @@ class TagPickerDialog(QDialog):
 
     def update_selection_count(self):
         """Shows how many tags are checked."""
-        count = len(self.get_checked_tags())
+        count = len(self.get_checked_items())
         self.selection_count_label.setText(f'{count} selected')
 
-    def get_checked_tags(self) -> list[str]:
-        """The tags that are checked, in the order of the list."""
-        tags = []
+    def get_checked_items(self) -> list[tuple[str, str]]:
+        """The (tag, detail) pairs that are checked, in the order of the
+        list."""
+        items = []
         for row in range(self.tag_list.count()):
             item = self.tag_list.item(row)
             if item.checkState() != Qt.CheckState.Checked:
                 continue
             tag = item.data(TAG_ROLE)
-            if tag not in self.stored_tags:
-                tags.append(tag)
-        return tags
+            if tag in self.stored_tags:
+                continue
+            items.append((tag, item.data(DETAIL_ROLE)))
+        return items
+
+    def get_checked_tags(self) -> list[str]:
+        """The tags that are checked, in the order of the list."""
+        return [tag for tag, _ in self.get_checked_items()]

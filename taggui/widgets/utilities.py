@@ -13,12 +13,28 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDockWidget, QFormLayout,
 
 from dialogs.tag_picker_dialog import TagPickerDialog
 from models.image_list_model import ImageListModel
-from tagging.vocabulary import (Vocabulary, append_basetags,
-                                append_ignore_tags, count_tags,
-                                get_dataset_folders_from_images,
-                                get_most_common_first_tag)
+from tagging.vocabulary import (BASE_SOURCE_FOLDER, BASE_SOURCE_ROOT,
+                                IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
+                                IGNORE_SOURCE_SECTION, Vocabulary,
+                                append_basetags, append_ignore_tags,
+                                count_tags, get_dataset_folders_from_images,
+                                get_most_common_first_tag, list_base_tags,
+                                list_ignore_tags, remove_base_tags,
+                                remove_ignore_tags)
 from utils.big_widgets import TallPushButton
 from utils.image import Image
+
+# The labels of the sources of the ignore tags and the base tags, shown
+# next to a tag in the deletion dialogs.
+IGNORE_SOURCE_LABELS = {
+    IGNORE_SOURCE_GLOBAL: 'global',
+    IGNORE_SOURCE_SECTION: 'this project',
+    IGNORE_SOURCE_FILE: 'this folder',
+}
+BASE_SOURCE_LABELS = {
+    BASE_SOURCE_ROOT: 'all projects',
+    BASE_SOURCE_FOLDER: 'this project',
+}
 
 
 class Utilities(QDockWidget):
@@ -45,6 +61,10 @@ class Utilities(QDockWidget):
         self.generate_base_tags_button = TallPushButton(
             'Generate Base Tags')
         self.generate_base_tags_button.clicked.connect(self.generate_base_tags)
+        self.delete_ignore_tags_button = TallPushButton('Delete Ignore Tags')
+        self.delete_ignore_tags_button.clicked.connect(self.delete_ignore_tags)
+        self.delete_base_tags_button = TallPushButton('Delete Base Tags')
+        self.delete_base_tags_button.clicked.connect(self.delete_base_tags)
         self.description_label = QLabel()
         self.description_label.setWordWrap(True)
         container = QWidget()
@@ -57,6 +77,8 @@ class Utilities(QDockWidget):
         layout.addWidget(self.description_label)
         layout.addWidget(self.generate_ignore_tags_button)
         layout.addWidget(self.generate_base_tags_button)
+        layout.addWidget(self.delete_ignore_tags_button)
+        layout.addWidget(self.delete_base_tags_button)
         layout.addStretch()
         self.setWidget(container)
         self.set_directory_path(None)
@@ -120,9 +142,13 @@ class Utilities(QDockWidget):
             self.description_label.setText('Load a directory first.')
             self.generate_ignore_tags_button.setEnabled(False)
             self.generate_base_tags_button.setEnabled(False)
+            self.delete_ignore_tags_button.setEnabled(False)
+            self.delete_base_tags_button.setEnabled(False)
             return
         self.generate_ignore_tags_button.setEnabled(True)
         self.generate_base_tags_button.setEnabled(True)
+        self.delete_ignore_tags_button.setEnabled(True)
+        self.delete_base_tags_button.setEnabled(True)
         images = self.get_folder_images(folder)
         counts, caption_count = count_tags([image.tags for image in images])
         trigger = get_most_common_first_tag([image.tags for image in images])
@@ -185,7 +211,8 @@ class Utilities(QDockWidget):
             return
         stored = self.get_stored_ignore_tags(folder)
         skip = self.get_skip_tags(folder)
-        items = [(tag, count) for tag, count in self.get_ranked_tags(folder)
+        items = [(tag, str(count))
+                 for tag, count in self.get_ranked_tags(folder)
                  if tag not in skip]
         if not items:
             QMessageBox.information(
@@ -230,7 +257,8 @@ class Utilities(QDockWidget):
         # The tags that are already ignored are not offered as base tags,
         # because a tag cannot be both.
         skip = self.get_skip_tags(folder) | self.get_stored_ignore_tags(folder)
-        items = [(tag, count) for tag, count in self.get_ranked_tags(folder)
+        items = [(tag, str(count))
+                 for tag, count in self.get_ranked_tags(folder)
                  if tag not in skip]
         if not items:
             QMessageBox.information(
@@ -264,4 +292,95 @@ class Utilities(QDockWidget):
             self, 'Base Tags Saved',
             f'{len(added)} tag(s) were added to the base tags of '
             f'{folder.name}:\n{", ".join(added)}')
+        self.update_description()
+
+    @Slot()
+    def delete_ignore_tags(self):
+        """Picks the ignore tags to delete and removes them."""
+        folder = self.get_current_folder()
+        if folder is None:
+            return
+        entries = list_ignore_tags(self.dataset_root, folder)
+        if not entries:
+            QMessageBox.information(
+                self, 'No Tags',
+                'There are no ignore tags to delete in this folder.')
+            return
+        dialog = TagPickerDialog(
+            parent=self,
+            title='Delete Ignore Tags',
+            description=('The ignore tags that are checked are removed from '
+                         'the dataset. Each tag is shown with the place it '
+                         'comes from, so that a tag can be removed from one '
+                         'place and kept in the others. '
+                         '"global" is the global block of the root '
+                         '`.ignoretags` file, which applies to every '
+                         'project of the dataset; "this project" is the '
+                         f'`#{folder.name.lower()}` section of that file; '
+                         '"this folder" is the `.ignoretags` file of the '
+                         'folder itself.'),
+            items=entries, accept_text='Delete',
+            detail_labels=IGNORE_SOURCE_LABELS)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.get_checked_items()
+        if not selected:
+            QMessageBox.information(
+                self, 'Nothing Selected',
+                'No tags were selected — nothing was deleted.')
+            return
+        removed = remove_ignore_tags(self.dataset_root, folder, selected)
+        if not removed:
+            QMessageBox.information(
+                self, 'Nothing Deleted',
+                'The selected tags were not found in the dataset.')
+            return
+        QMessageBox.information(
+            self, 'Ignore Tags Deleted',
+            f'{len(removed)} tag(s) were removed from the ignore list:\n'
+            f'{", ".join(tag for tag, _ in removed)}')
+        self.update_description()
+
+    @Slot()
+    def delete_base_tags(self):
+        """Picks the base tags to delete and removes them."""
+        folder = self.get_current_folder()
+        if folder is None:
+            return
+        entries = list_base_tags(self.dataset_root, folder)
+        if not entries:
+            QMessageBox.information(
+                self, 'No Tags',
+                'There are no base tags to delete in this folder.')
+            return
+        dialog = TagPickerDialog(
+            parent=self,
+            title='Delete Base Tags',
+            description=('The base tags that are checked are removed from '
+                         'the dataset. Each tag is shown with the place it '
+                         'comes from, so that a tag can be removed from one '
+                         'place and kept in the others. "all projects" is the '
+                         '`.basetags` file of the dataset root, which is '
+                         'shared with every project; "this project" is the '
+                         '`.basetags` file of the folder itself.'),
+            items=entries, accept_text='Delete',
+            detail_labels=BASE_SOURCE_LABELS)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.get_checked_items()
+        if not selected:
+            QMessageBox.information(
+                self, 'Nothing Selected',
+                'No tags were selected — nothing was deleted.')
+            return
+        removed = remove_base_tags(self.dataset_root, folder, selected)
+        if not removed:
+            QMessageBox.information(
+                self, 'Nothing Deleted',
+                'The selected tags were not found in the dataset.')
+            return
+        QMessageBox.information(
+            self, 'Base Tags Deleted',
+            f'{len(removed)} tag(s) were removed from the base tags:\n'
+            f'{", ".join(tag for tag, _ in removed)}')
         self.update_description()

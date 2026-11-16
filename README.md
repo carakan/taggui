@@ -218,6 +218,28 @@ in, most frequent first. Use the filter box to narrow the list down, and
 word is never offered, and the tags that are already stored are shown
 checked and cannot be unchecked.
 
+The pane also deletes the vocabulary of a dataset folder:
+
+- `Delete Ignore Tags`: opens the ignore tags that the dataset currently
+  has. The tags that you check are removed from the dataset.
+- `Delete Base Tags`: opens the base tags that the dataset currently has.
+  The tags that you check are removed from the dataset.
+
+Every tag is shown with the place it comes from, so that a tag can be
+removed from one place and kept in the others:
+
+| Source | Ignore tags | Base tags |
+| --- | --- | --- |
+| `global` | the global block of the root `.ignoretags` file, which applies to every folder of the dataset | |
+| `all projects` | | the `.basetags` file of the dataset root, which is shared with every folder |
+| `this project` | the `#foldername` section of the root `.ignoretags` file | the `.basetags` file of the folder |
+| `this folder` | the `.ignoretags` file of the folder | |
+
+A tag that is in several places is listed once per place, so it can be
+removed from one of them and kept in the others. The two dialogs use the
+same filter box and `Select All` / `Select None` buttons as the generate
+dialogs.
+
 
 ## Advanced Image List Filtering
 
