@@ -18,8 +18,13 @@ DEFAULT_SETTINGS = {
 
 
 def get_settings() -> QSettings:
-    settings = QSettings('taggui', 'taggui')
-    return settings
+    # The format and the scope are given on purpose: the short
+    # constructor of PySide6 always uses the native format and ignores
+    # the default one, and the tests point the default one at a
+    # directory of their own, to keep away from the settings of the
+    # user.
+    return QSettings(QSettings.defaultFormat(), QSettings.Scope.UserScope,
+                     'taggui', 'taggui')
 
 
 def get_tag_separator() -> str:

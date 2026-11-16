@@ -6,6 +6,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
+sys.path.insert(0, str(Path(__file__).parent))
+
+# The tests use settings of their own, to keep away from the ones
+# of the user.
+import settings_isolation  # noqa: E402,F401
 
 from PySide6.QtCore import QItemSelectionModel  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402

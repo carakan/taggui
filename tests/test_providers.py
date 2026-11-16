@@ -14,6 +14,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
+sys.path.insert(0, str(Path(__file__).parent))
+
+# The tests use settings of their own, to keep away from the ones
+# of the user.
+import settings_isolation  # noqa: E402,F401
 
 from tagging.client import (AnthropicClient, GeminiClient,  # noqa: E402
                             LlmClient, Provider, PROVIDER_PRESETS,

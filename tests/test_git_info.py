@@ -7,6 +7,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
+sys.path.insert(0, str(Path(__file__).parent))
+
+# The tests use settings of their own, to keep away from the ones
+# of the user.
+import settings_isolation  # noqa: E402,F401
 
 from utils.git_info import (GitCaptionState, compute_diff,  # noqa: E402
                             find_repository_root, split_tags)

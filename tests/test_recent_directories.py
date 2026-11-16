@@ -10,6 +10,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
+sys.path.insert(0, str(Path(__file__).parent))
+
+# The tests use settings of their own, to keep away from the ones
+# of the user.
+import settings_isolation  # noqa: E402,F401
 
 from utils.recent_directories import (MAXIMUM,  # noqa: E402
                                       add_recent_directory,
@@ -112,6 +117,31 @@ class RecentDirectoriesMenuTest(unittest.TestCase):
         texts = [action.text() for action in
                  window.recent_directories_menu.actions()]
         self.assertEqual(texts, ['No recent directories'])
+
+    def test_the_directory_is_remembered(self):
+        from utils.settings import get_settings
+        window = self._make_window()
+        window.load_directory(self.folder)
+        self.assertEqual(get_settings().value('directory_path', type=str),
+                         str(self.folder))
+
+    def test_the_last_project_is_open_when_the_app_starts(self):
+        from utils.settings import get_settings
+        get_settings().setValue('directory_path', str(self.folder))
+        window = self._make_window()
+        self.assertEqual(window.directory_path, self.folder)
+
+    def test_a_directory_of_the_menu_is_remembered(self):
+        # A project that is opened from the menu is the one the app comes
+        # back to.
+        from utils.settings import get_settings
+        window = self._make_window()
+        window.load_directory(self.folder)
+        action = [a for a in window.recent_directories_menu.actions()
+                  if a.text().startswith('morenada-shots')][0]
+        action.trigger()
+        self.assertEqual(get_settings().value('directory_path', type=str),
+                         str(self.folder))
 
     def test_a_loaded_directory_is_in_the_menu(self):
         window = self._make_window()

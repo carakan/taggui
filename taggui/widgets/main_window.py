@@ -236,11 +236,10 @@ class MainWindow(QMainWindow):
         central_widget.addWidget(self.image_viewer)
         self.setCentralWidget(central_widget)
 
-    def load_directory(self, path: Path, select_index: int = 0,
-                       save_path_to_settings: bool = False):
+    def load_directory(self, path: Path, select_index: int = 0):
         self.directory_path = path.resolve()
-        if save_path_to_settings:
-            self.settings.setValue('directory_path', str(self.directory_path))
+        # The directory that is open is the one the app comes back to.
+        self.settings.setValue('directory_path', str(self.directory_path))
         self.setWindowTitle(path.name)
         self.image_list_model.load_directory(path)
         self.image_list.filter_line_edit.clear()
@@ -271,8 +270,7 @@ class MainWindow(QMainWindow):
             dir=initial_directory)
         if not load_directory_path:
             return
-        self.load_directory(Path(load_directory_path),
-                            save_path_to_settings=True)
+        self.load_directory(Path(load_directory_path))
 
     def update_recent_directories_menu(self):
         """Fills the `Open Recent` menu with the directories that were
