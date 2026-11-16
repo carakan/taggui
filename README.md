@@ -247,6 +247,9 @@ in, most frequent first. Use the filter box to narrow the list down, and
 word is never offered, and the tags that are already stored are shown
 checked and cannot be unchecked.
 
+The `Sort tags alphabetically` option lists the tags of all four dialogs
+in alphabetical order instead. The option is remembered between the runs.
+
 The pane also deletes the vocabulary of a dataset folder:
 
 - `Delete Ignore Tags`: opens the ignore tags that the dataset currently

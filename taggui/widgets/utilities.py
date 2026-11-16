@@ -23,6 +23,7 @@ from tagging.vocabulary import (IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
                                 remove_base_tags, remove_ignore_tags)
 from utils.big_widgets import TallPushButton
 from utils.image import Image
+from utils.settings_widgets import SettingsBigCheckBox
 
 
 class Utilities(QDockWidget):
@@ -55,6 +56,9 @@ class Utilities(QDockWidget):
         self.delete_base_tags_button.clicked.connect(self.delete_base_tags)
         self.description_label = QLabel()
         self.description_label.setWordWrap(True)
+        # The order of the tags in the dialogs of the four buttons.
+        self.sort_alphabetically_check_box = SettingsBigCheckBox(
+            'utilities_sort_alphabetically', False, 'Sort tags alphabetically')
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -63,6 +67,7 @@ class Utilities(QDockWidget):
         form.addRow('Dataset folder', self.folder_combo_box)
         layout.addLayout(form)
         layout.addWidget(self.description_label)
+        layout.addWidget(self.sort_alphabetically_check_box)
         layout.addWidget(self.generate_ignore_tags_button)
         layout.addWidget(self.generate_base_tags_button)
         layout.addWidget(self.delete_ignore_tags_button)
@@ -91,6 +96,18 @@ class Utilities(QDockWidget):
             return str(folder.relative_to(root))
         except ValueError:
             return str(folder)
+
+    def order_items(self,
+                    items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """The tags of a dialog, in the order they are shown in.
+
+        They are sorted alphabetically when the option is on. Otherwise
+        they keep the order they come in: by number of images for the
+        generate dialogs, by source for the delete ones.
+        """
+        if self.sort_alphabetically_check_box.isChecked():
+            return sorted(items, key=lambda item: item[0])
+        return list(items)
 
     def get_folders(self) -> list[Path]:
         """The dataset folders of the loaded dataset."""
@@ -219,7 +236,7 @@ class Utilities(QDockWidget):
                          'caption. They are saved in the `.ignoretags` file '
                          f'of {self.dataset_root.name}, under the section '
                          f'#{folder.name.lower()}.'),
-            items=items, stored_tags=stored)
+            items=self.order_items(items), stored_tags=stored)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         tags = set(dialog.get_checked_tags())
@@ -266,7 +283,7 @@ class Utilities(QDockWidget):
                          'image, which keeps the terminology consistent. '
                          f'They are saved in the `.basetags` file of '
                          f'{folder.name}.'),
-            items=items, stored_tags=stored)
+            items=self.order_items(items), stored_tags=stored)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         tags = dialog.get_checked_tags()
@@ -342,7 +359,7 @@ class Utilities(QDockWidget):
             parent=self,
             title='Delete Ignore Tags',
             description=self.get_ignore_description(folder),
-            items=entries, accept_text='Delete',
+            items=self.order_items(entries), accept_text='Delete',
             detail_labels=self.get_ignore_source_labels(folder))
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -383,7 +400,8 @@ class Utilities(QDockWidget):
                          'checked are removed from the `.basetags` file of '
                          f'the {folder.name} folder, so that they are not '
                          'sent to the model with the images any more.'),
-            items=[(tag, '') for tag in tags], accept_text='Delete')
+            items=self.order_items([(tag, '') for tag in tags]),
+            accept_text='Delete')
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dialog.get_checked_tags()

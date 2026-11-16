@@ -312,11 +312,19 @@ class UtilitiesDeletionTest(unittest.TestCase):
         (self.root / '.basetags').write_text('baseroot1\n')
         (self.folder / '.basetags').write_text('basefile1\n')
         self.checked_items: list[tuple[str, str]] = []
+        # The sort option is remembered between the runs, so it is cleared
+        # to keep the tests independent of each other.
+        self._clear_sort_setting()
         self._install_stub()
 
     def tearDown(self):
         self._restore_stub()
+        self._clear_sort_setting()
         self.directory.cleanup()
+
+    def _clear_sort_setting(self):
+        from utils.settings import get_settings
+        get_settings().remove('utilities_sort_alphabetically')
 
     def _install_stub(self):
         """Replaces the tag picker and the message boxes with stubs."""
@@ -444,6 +452,22 @@ class UtilitiesDeletionTest(unittest.TestCase):
         utilities = self.make_utilities()
         description = utilities.get_ignore_description(self.folder)
         self.assertIn('belongs to this project only', description)
+
+    def test_the_tags_keep_their_order_by_default(self):
+        utilities = self.make_utilities()
+        items = [('zebra', '1'), ('apple', '2')]
+        self.assertEqual(utilities.order_items(items), items)
+
+    def test_the_tags_are_sorted_alphabetically_with_the_option(self):
+        utilities = self.make_utilities()
+        utilities.sort_alphabetically_check_box.setChecked(True)
+        items = [('zebra', '1'), ('apple', '2')]
+        self.assertEqual(utilities.order_items(items),
+                         [('apple', '2'), ('zebra', '1')])
+
+    def test_the_option_is_off_by_default(self):
+        utilities = self.make_utilities()
+        self.assertFalse(utilities.sort_alphabetically_check_box.isChecked())
 
 
 if __name__ == '__main__':
