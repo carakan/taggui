@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QSize, Qt, Slot
+from PySide6.QtCore import QModelIndex, QPoint, QSize, Qt, Slot
 from PySide6.QtGui import QImageReader, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -53,13 +53,35 @@ class ImageViewer(QWidget):
         self.image_label.installEventFilter(self)
 
     def eventFilter(self, watched, event):
-        """Keeps the overlay in the top left corner of the image."""
-        if watched is self.image_label and event.type() == event.Type.Resize:
-            self.position_overlay()
+        """Keeps the overlay in the top left corner of the image and handles
+        the clicks on it."""
+        if watched is self.image_label:
+            if event.type() == event.Type.Resize:
+                self.position_overlay()
+            elif event.type() == event.Type.MouseButtonPress:
+                self.handle_overlay_click(event.pos())
         return super().eventFilter(watched, event)
+
+    def handle_overlay_click(self, position: QPoint):
+        """Clicks the line of the overlay that does something.
+
+        The overlay is transparent for the mouse, so the click arrives
+        here.
+        """
+        action = self.overlay.action_at(
+            position.x() - self.overlay.x(),
+            position.y() - self.overlay.y())
+        if action is None:
+            return
+        _action, entry_index = action
+        self.overlay.toggle(entry_index)
+        self.position_overlay()
 
     def position_overlay(self):
         """Places the overlay in the top left corner of the image."""
+        # The overlay takes the width that is left of the image, so that
+        # its text is folded instead of cut.
+        self.overlay.set_max_width(self.image_label.width() - 24)
         self.overlay.resize(self.overlay.sizeHint())
         self.overlay.move(12, 12)
 

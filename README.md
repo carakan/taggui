@@ -431,6 +431,15 @@ You can nest parentheses and operators to create arbitrarily complex filters.
 - Dragging the selected images out of the list opens them in another
   application.
 
+The top left corner of the large image holds an overlay with the name and
+the size of every selected image. When the dataset is a git repository, it
+also holds the tags that were added and removed in the caption file of the
+image since the committed version, in green and in red.
+
+Only the first six tags of a diff are shown. The rest is behind a `+N
+more` link; clicking it shows the whole diff, and `show less` folds it
+back.
+
 ### Image Tags pane
 
 - Add a tag: Type the tag into the `Add Tag` box and press `Enter`
