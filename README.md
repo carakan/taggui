@@ -208,6 +208,11 @@ The dropped tags are listed in the audit log, under `conflicting colors
 (one color tag per garment)` for the response and `dropped (another color
 for the same garment)` for the caption.
 
+The colors of a multi-color garment are also sorted alphabetically in the
+final tags — `red-black dress` becomes `black-red dress` — on every write,
+like in the reference script. It is part of the tagging, not a separate
+step to run.
+
 ### Dataset vocabulary
 
 The dataset can carry a vocabulary, in the same format as the reference

@@ -435,6 +435,30 @@ class TaggerTest(unittest.TestCase):
         self.assertEqual(result.tags, ['mytrigger', '1girl', 'smiling',
                                         'solo'])
 
+    def test_the_final_tags_carry_the_alphabetical_color_order(self):
+        # The order of the colors of a garment is part of the final tags,
+        # like in the reference script.
+        tagger = self.make_tagger(['1girl, red-black dress'])
+        result = tagger.tag_image(Path('/tmp/photo.jpg'), ['mytrigger'])
+        self.assertIn('black-red dress', result.tags)
+        self.assertNotIn('red-black dress', result.tags)
+
+    def test_the_final_tags_sort_the_colors_of_a_garment(self):
+        tagger = self.make_tagger(['1girl, yellow-white-blue hat'])
+        result = tagger.tag_image(Path('/tmp/photo.jpg'), ['mytrigger'])
+        self.assertIn('blue-white-yellow hat', result.tags)
+
+    def test_the_final_tags_keep_one_color_per_garment(self):
+        tagger = self.make_tagger(['1girl, red dress, yellow dress'])
+        result = tagger.tag_image(Path('/tmp/photo.jpg'), ['mytrigger'])
+        self.assertEqual(result.tags, ['mytrigger', '1girl', 'red dress'])
+
+    def test_a_fresh_color_wins_over_the_color_of_the_old_caption(self):
+        tagger = self.make_tagger(['green dress'])
+        result = tagger.tag_image(Path('/tmp/photo.jpg'),
+                                  ['mytrigger', 'red dress'])
+        self.assertEqual(result.tags, ['mytrigger', 'green dress'])
+
     def test_ignored_tags_are_dropped(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
