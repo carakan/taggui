@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
 
 from tagging.vocabulary import (IGNORE_SOURCE_FILE,  # noqa: E402
                                 IGNORE_SOURCE_GLOBAL, IGNORE_SOURCE_SECTION,
-                                Vocabulary, list_base_tags,
+                                Vocabulary, find_dataset_root, list_base_tags,
                                 list_ignore_section_folders, list_ignore_tags,
                                 remove_base_tags, remove_ignore_tags)
 
@@ -105,6 +105,42 @@ class ListIgnoreSectionFoldersTest(VocabularyRemovalTest):
         other = self.root / 'otherfolder'
         other.mkdir()
         self.assertEqual(list_ignore_section_folders(self.root, other), [])
+
+
+class FindDatasetRootTest(unittest.TestCase):
+    """The directory the vocabulary files are read from."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name).resolve()
+        self.folder = self.root / 'myfolder'
+        self.folder.mkdir()
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_the_directory_itself_is_the_root(self):
+        self.assertEqual(find_dataset_root(self.folder), self.folder)
+
+    def test_the_parent_is_the_root_when_it_holds_the_ignore_file(self):
+        (self.root / '.ignoretags').write_text('global\n')
+        self.assertEqual(find_dataset_root(self.folder), self.root)
+
+    def test_the_parent_is_not_the_root_without_the_ignore_file(self):
+        self.assertEqual(find_dataset_root(self.folder), self.folder)
+
+    def test_only_the_parent_is_looked_at(self):
+        # The grandparent is not searched, so a dataset of nested
+        # projects is not looked at any deeper.
+        (self.root / '.ignoretags').write_text('global\n')
+        deeper = self.folder / 'deeper'
+        deeper.mkdir()
+        # The parent of 'deeper' holds no `.ignoretags` file, so 'deeper'
+        # is its own root; the grandparent is not searched.
+        self.assertEqual(find_dataset_root(deeper), deeper)
+
+    def test_the_root_of_the_filesystem_is_the_root(self):
+        self.assertEqual(find_dataset_root(Path('/')), Path('/'))
 
 
 class RemoveIgnoreTagsTest(VocabularyRemovalTest):

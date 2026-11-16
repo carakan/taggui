@@ -249,6 +249,22 @@ def _normalize_tag(tag: str) -> str:
     return re.sub(r'\s+', ' ', tag.strip().lower())
 
 
+def find_dataset_root(directory: Path) -> Path:
+    """The directory the vocabulary files are read from.
+
+    The reference script reads them from the directory it is run in, which
+    is the directory that holds the project folders. When a project folder
+    is opened on its own, the parent directory is the dataset root when it
+    holds an `.ignoretags` file. Only the parent is looked at, so a
+    dataset of nested projects is not searched any deeper.
+    """
+    directory = Path(directory)
+    parent = directory.parent
+    if parent != directory and (parent / '.ignoretags').exists():
+        return parent
+    return directory
+
+
 def list_ignore_tags(root: Path, folder: Path) -> list[tuple[str, str]]:
     """The ignore tags of a folder, with the source each one comes from.
 

@@ -218,6 +218,13 @@ tagging script:
 
 Click `Edit Dataset Vocabulary` to review and edit these files.
 
+The dataset root is the directory that holds the project folders, which is
+the directory the reference script is run in. When a project folder is
+opened on its own, the app uses its parent directory as the dataset root
+when that parent holds an `.ignoretags` file, so the vocabulary of the
+whole dataset is found either way. Only the parent is looked at, so a
+dataset of nested projects is not searched any deeper.
+
 ### Utilities
 
 The `Utilities` pane generates the vocabulary of a dataset folder out of the

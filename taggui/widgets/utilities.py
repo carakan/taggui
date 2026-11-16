@@ -16,7 +16,8 @@ from models.image_list_model import ImageListModel
 from tagging.vocabulary import (IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
                                 IGNORE_SOURCE_SECTION, Vocabulary,
                                 append_basetags, append_ignore_tags,
-                                count_tags, get_dataset_folders_from_images,
+                                count_tags, find_dataset_root,
+                                get_dataset_folders_from_images,
                                 get_most_common_first_tag, list_base_tags,
                                 list_ignore_section_folders, list_ignore_tags,
                                 remove_base_tags, remove_ignore_tags)
@@ -83,10 +84,11 @@ class Utilities(QDockWidget):
 
     def get_folder_label(self, folder: Path) -> str:
         """The name of a folder, relative to the dataset root."""
-        if self.directory_path is None:
+        root = self.dataset_root
+        if folder == root:
             return folder.name
         try:
-            return str(folder.relative_to(self.directory_path))
+            return str(folder.relative_to(root))
         except ValueError:
             return str(folder)
 
@@ -185,10 +187,14 @@ class Utilities(QDockWidget):
 
     @property
     def dataset_root(self) -> Path:
-        """The root of the dataset, the directory that holds the folders."""
+        """The root of the dataset, the directory that holds the folders.
+
+        It is the loaded directory, unless its parent holds the
+        `.ignoretags` file of the dataset.
+        """
         if self.directory_path is None:
             return Path.cwd()
-        return self.directory_path
+        return find_dataset_root(self.directory_path)
 
     @Slot()
     def generate_ignore_tags(self):

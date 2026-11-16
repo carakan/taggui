@@ -28,7 +28,7 @@ from tagging.client import (DEFAULT_API_KEY, DEFAULT_BASE_URL, DEFAULT_MAX_TOKEN
 from tagging.tagger import (TagMode, TagOrder, Tagger, TaggerSettings,
                             modified_caption_files)
 from tagging.tagging_thread import TaggingThread
-from tagging.vocabulary import Vocabulary
+from tagging.vocabulary import Vocabulary, find_dataset_root
 from utils.big_widgets import (TallPushButton, checkbox_with_help,
                                label_with_help)
 from utils.settings_widgets import (FocusedScrollSettingsComboBox,
@@ -345,12 +345,13 @@ class LlmTagger(QDockWidget):
         if directory_path is None:
             self.settings_form.vocabulary_path_label.setText('No directory')
             return
-        vocabulary = Vocabulary(directory_path)
+        root = find_dataset_root(directory_path)
+        vocabulary = Vocabulary(root)
         global_count = len(vocabulary.global_tags)
         section_count = sum(len(tags) for tags in vocabulary.sections.values())
         base_count = len(vocabulary.root_basetags)
         self.settings_form.vocabulary_path_label.setText(
-            f'{directory_path}<br>{global_count} global ignore tag(s), '
+            f'{root}<br>{global_count} global ignore tag(s), '
             f'{section_count} section tag(s), {base_count} base tag(s)')
 
     @Slot()
@@ -375,7 +376,7 @@ class LlmTagger(QDockWidget):
                 'Load a directory first to edit its vocabulary.')
             return
         dialog = VocabularyDialog(parent=self,
-                                  dataset_root=self.directory_path)
+                                  dataset_root=self.get_dataset_root([]))
         dialog.exec()
         self.set_directory_path(self.directory_path)
 
@@ -428,7 +429,7 @@ class LlmTagger(QDockWidget):
     def get_dataset_root(self, image_indices: list[QModelIndex]) -> Path:
         """The directory the vocabulary files are read from."""
         if self.directory_path is not None:
-            return self.directory_path
+            return find_dataset_root(self.directory_path)
         folders = {self.image_list_model.data(index, Qt.ItemDataRole.UserRole)
                    .path.parent for index in image_indices}
         if len(folders) == 1:
