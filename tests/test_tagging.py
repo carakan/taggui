@@ -130,6 +130,87 @@ class RulesTest(unittest.TestCase):
         prompt = build_prompt('trigger', 35)
         self.assertEqual(filter_tags(['long_hair'], prompt, set(), set()), [])
 
+    def test_filter_tags_keeps_one_color_tag_per_garment(self):
+        prompt = build_prompt('trigger', 35)
+        tags = filter_tags(['1girl', 'red dress', 'yellow dress',
+                             'green dress'], prompt, {'1girl'}, set())
+        self.assertEqual(tags, ['1girl', 'red dress'])
+
+    def test_filter_tags_keeps_the_color_of_each_garment(self):
+        prompt = build_prompt('trigger', 35)
+        tags = filter_tags(['red dress', 'blue skirt', 'yellow hat'], prompt,
+                            set(), set())
+        self.assertEqual(tags, ['red dress', 'blue skirt', 'yellow hat'])
+
+    def test_filter_tags_keeps_a_multi_color_garment_tag(self):
+        prompt = build_prompt('trigger', 35)
+        tags = filter_tags(['black-red dress', 'white dress'], prompt,
+                            set(), set())
+        self.assertEqual(tags, ['black-red dress'])
+
+    def test_filter_tags_keeps_a_color_that_is_not_a_garment(self):
+        # Only the garments are limited to one color tag. Hair and eyes
+        # are not garments.
+        prompt = build_prompt('trigger', 35)
+        tags = filter_tags(['blue eyes', 'red eyes'], prompt, set(), set())
+        self.assertEqual(tags, ['blue eyes', 'red eyes'])
+
+    def test_filter_tags_does_not_confuse_different_garments(self):
+        prompt = build_prompt('trigger', 35)
+        tags = filter_tags(['red dress', 'white skirt'], prompt, set(), set())
+        self.assertEqual(tags, ['red dress', 'white skirt'])
+
+    def test_filter_tags_reports_the_dropped_color_tags(self):
+        from tagging.rules import filter_tags_detailed
+        prompt = build_prompt('trigger', 35)
+        kept, drops = filter_tags_detailed(
+            ['red dress', 'yellow dress'], prompt, set(), set())
+        self.assertEqual(kept, ['red dress'])
+        self.assertIn(
+            'conflicting colors (one color tag per garment)',
+            [label for label, _ in drops])
+        dropped = dict(drops)['conflicting colors (one color tag per garment)']
+        self.assertEqual(dropped, ['yellow dress'])
+
+    def test_color_garment_noun_finds_the_garment(self):
+        from tagging.rules import color_garment_noun
+        self.assertEqual(color_garment_noun('black-red dress'), 'dress')
+        self.assertEqual(color_garment_noun('red hat'), 'hat')
+        self.assertIsNone(color_garment_noun('red eyes'))
+        self.assertIsNone(color_garment_noun('dress'))
+
+    def test_keep_one_color_per_garment_keeps_the_first_color(self):
+        from tagging.rules import keep_one_color_per_garment
+        kept, dropped = keep_one_color_per_garment(
+            ['red dress', 'yellow dress', 'blue skirt'])
+        self.assertEqual(kept, ['red dress', 'blue skirt'])
+        self.assertEqual(dropped, ['yellow dress'])
+
+    def test_merge_tags_keeps_one_color_for_the_garment(self):
+        merged = merge_tags('trigger', ['red dress'],
+                            ['trigger', 'green dress'], set(), prune=False)
+        self.assertEqual(merged, ['red dress'])
+
+    def test_merge_tags_drops_the_old_colors_of_a_garment(self):
+        merged = merge_tags('trigger', ['green dress'],
+                            ['trigger', 'green dress', 'green-yellow dress'],
+                            set(), prune=False)
+        self.assertEqual(merged, ['green dress'])
+
+    def test_merge_tags_reports_the_dropped_colors(self):
+        from tagging.rules import merge_tags_detailed
+        _merged, accounting = merge_tags_detailed(
+            'trigger', ['green dress'],
+            ['trigger', 'green-yellow dress'], set(), prune=False)
+        self.assertEqual(
+            accounting['dropped (another color for the same garment)'],
+            ['green-yellow dress'])
+
+    def test_merge_tags_keeps_the_colors_of_different_garments(self):
+        merged = merge_tags('trigger', ['red dress', 'blue skirt'],
+                            ['trigger'], set(), prune=False)
+        self.assertEqual(merged, ['red dress', 'blue skirt'])
+
     def test_merge_tags_keeps_existing_tags(self):
         merged = merge_tags('trigger', ['1girl', 'smiling'],
                             ['trigger', 'dress'], set(), prune=False)
@@ -194,6 +275,28 @@ class PromptTest(unittest.TestCase):
                                prune=True)
         self.assertIn('zarzuela', prompt)
         self.assertIn('Dataset-local vocabulary', prompt)
+
+    def test_the_color_rule_is_not_mandatory(self):
+        # A mandatory color rule makes the model guess a color for every
+        # garment, which is what puts colors in the captions that are not
+        # in the photo.
+        self.assertNotIn('COLOR RULE (mandatory)', TAG_PROMPT_TEMPLATE)
+
+    def test_the_prompt_forbids_guessing_colors(self):
+        prompt = build_prompt('mytrigger', 35)
+        self.assertIn('NEVER guess a color', prompt)
+        self.assertIn('A missing color tag is always better than a wrong one',
+                      prompt)
+
+    def test_the_prompt_forbids_inferring_colors(self):
+        prompt = build_prompt('mytrigger', 35)
+        self.assertIn('NEVER infer a color', prompt)
+        self.assertIn('NEVER take the color of a garment from the '
+                      'surroundings', prompt)
+
+    def test_the_prompt_forbids_several_colors_for_one_garment(self):
+        prompt = build_prompt('mytrigger', 35)
+        self.assertIn('NEVER give a garment more than one color tag', prompt)
 
 
 class VocabularyTest(unittest.TestCase):

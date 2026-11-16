@@ -181,6 +181,28 @@ The default template is the one from the reference tagging script, and it
 enforces a danbooru-style vocabulary, a single count tag, and one
 alphabetically ordered color tag per garment.
 
+### Colors
+
+A color tag is only worth having when the color is really in the photo.
+Two rules keep the made-up colors out.
+
+The prompt asks for the color of a garment only when it is clearly
+visible, and forbids guessing a color, inferring one from the garment
+type, the culture or the occasion, and taking one from the surroundings
+— colored light, a colored background or the color grading of the photo
+does not make a garment that color. When the color is not clear, the
+model tags the garment alone; a missing color is better than a wrong one.
+
+The house rule of one color tag per garment is also enforced in the code.
+A response that gives the same garment several colors — `red dress,
+yellow dress, green dress` — is the model making up colors, so all but
+the first one are dropped. The rule is applied to the caption as a whole,
+so a re-tag also cleans the extra colors of the old caption.
+
+The dropped tags are listed in the audit log, under `conflicting colors
+(one color tag per garment)` for the response and `dropped (another color
+for the same garment)` for the caption.
+
 ### Dataset vocabulary
 
 The dataset can carry a vocabulary, in the same format as the reference

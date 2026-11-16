@@ -199,6 +199,45 @@ def _is_plain_garment(tag: str) -> bool:
     return not _fold_colors(parts)
 
 
+def color_garment_noun(tag: str) -> str | None:
+    """The garment of a color-garment tag ('black-red dress' -> 'dress').
+
+    None when the tag is not a color attached to a garment.
+    """
+    head, sep, noun = tag.rpartition(' ')
+    if not sep:
+        return None
+    parts = [p for chunk in head.split('-') for p in chunk.split()]
+    if noun.lower() in GARMENT_NOUNS and _fold_colors(parts):
+        return noun.lower()
+    return None
+
+
+def keep_one_color_per_garment(tags: list[str]) -> tuple[list[str], list[str]]:
+    """Keeps only the first color tag of each garment.
+
+    The house rule is one color tag per garment ("red dress", or one tag
+    with all the colors hyphenated). A response that gives the same
+    garment several colors — 'red dress, yellow dress, green dress' — is
+    the model making up colors rather than seeing them, so all but the
+    first one are dropped. The first one is kept, because the prompt
+    orders the tags from the most to the least important.
+
+    Returns the surviving tags and the dropped ones.
+    """
+    seen: set[str] = set()
+    kept, dropped = [], []
+    for tag in tags:
+        noun = color_garment_noun(tag)
+        if noun is None or noun not in seen:
+            if noun is not None:
+                seen.add(noun)
+            kept.append(tag)
+            continue
+        dropped.append(tag)
+    return kept, dropped
+
+
 def attach_color_chains(tags: list[str]) -> list[str]:
     """Folds bare hyphenated color chains into the garment they belong to:
     ['black-red', 'skirt'] -> ['black-red skirt']. A chain is NEVER kept
@@ -263,6 +302,13 @@ def filter_tags_detailed(
         if dropped:
             drops.append((label, dropped))
         remaining = [tag for tag in remaining if keep(tag)]
+    # The one-color-per-garment rule is not a per-tag filter: it needs the
+    # whole list, because it compares the color tags of the same garment
+    # with each other.
+    remaining, dropped = keep_one_color_per_garment(remaining)
+    if dropped:
+        drops.append(('conflicting colors (one color tag per garment)',
+                      dropped))
     return remaining, drops
 
 
@@ -315,6 +361,13 @@ def merge_tags_detailed(
     merged = normalize_color_order(attach_color_chains(merged))
     accounting['lost folding color chains / reordering'] = [
         tag for tag in pre_normalize if tag not in merged]
+    # The caption holds one color tag per garment. The tags of the model
+    # come first in the merged list, so a fresh color wins over the one of
+    # the old caption.
+    merged, color_drops = keep_one_color_per_garment(merged)
+    if color_drops:
+        accounting['dropped (another color for the same garment)'] = (
+            color_drops)
     accounting['merged result'] = merged
     return merged, accounting
 
