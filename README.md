@@ -297,9 +297,15 @@ names as the `--show-meta` output of the reference script:
 | `folder file` | the `.ignoretags` file of the folder. It is ignored by that project only. |
 
 A tag that is in several places is listed once per place, so it can be
-removed from one of them and kept in the others. Removing a tag from a
-section that is shared with other projects removes it from that project
-only; the other projects keep it.
+removed from one of them and kept in the others.
+
+A tag of a section that other projects have too is removed from every
+project that has it. The sections of a dataset are often copies of each
+other, and removing the tag from one of them only would ask for the same
+work in every other project. Such a tag shows the projects it is shared
+with, and the projects it was removed from are named when the deletion is
+done. A section header that names several projects stays one section: it
+is edited, not split into a section per project.
 
 The two dialogs use the same filter box and `Select All` / `Select None`
 buttons as the generate dialogs.

@@ -15,7 +15,8 @@ from tagging.vocabulary import (IGNORE_SOURCE_FILE,  # noqa: E402
                                 IGNORE_SOURCE_GLOBAL, IGNORE_SOURCE_SECTION,
                                 Vocabulary, find_dataset_root, list_base_tags,
                                 list_ignore_section_folders, list_ignore_tags,
-                                remove_base_tags, remove_ignore_tags)
+                                list_shared_section_tags, remove_base_tags,
+                                remove_ignore_tags)
 
 
 class VocabularyRemovalTest(unittest.TestCase):
@@ -65,6 +66,36 @@ class ListIgnoreTagsTest(VocabularyRemovalTest):
         self.assertEqual(
             sorted(source for tag, source in entries if tag == 'shared'),
             [IGNORE_SOURCE_GLOBAL, IGNORE_SOURCE_SECTION])
+
+
+class ListSharedSectionTagsTest(VocabularyRemovalTest):
+    """The listing of the section tags that other projects have too."""
+
+    def test_a_tag_of_one_project_only_is_not_shared(self):
+        shared = list_shared_section_tags(self.root, self.folder)
+        self.assertNotIn('section1', shared)
+
+    def test_a_tag_of_several_projects_is_shared(self):
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder\nshared\n'
+            '#otherfolder\nshared\n')
+        shared = list_shared_section_tags(self.root, self.folder)
+        self.assertEqual(shared, {'shared': ['otherfolder']})
+
+    def test_a_section_that_names_several_folders_shares_its_tags(self):
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder, otherfolder\nshared\n')
+        shared = list_shared_section_tags(self.root, self.folder)
+        self.assertEqual(shared, {'shared': ['otherfolder']})
+
+    def test_the_global_tags_are_not_shared(self):
+        # The global block is shared with every project by itself.
+        shared = list_shared_section_tags(self.root, self.folder)
+        self.assertNotIn('global1', shared)
 
 
 class ListBaseTagsTest(VocabularyRemovalTest):
@@ -231,7 +262,10 @@ class RemoveIgnoreTagsTest(VocabularyRemovalTest):
                            [('global1', IGNORE_SOURCE_GLOBAL)])
         self.assertFalse((self.root / '.ignoretags').exists())
 
-    def test_a_shared_section_is_split_for_one_folder(self):
+    def test_a_shared_section_is_edited_and_kept_as_one_section(self):
+        # A section that names several folders is one block. The tag is
+        # removed from all of them, and the header stays as it is, so
+        # that the file does not fill up with a section per project.
         other = self.root / 'otherfolder'
         other.mkdir()
         (self.root / '.ignoretags').write_text(
@@ -240,7 +274,46 @@ class RemoveIgnoreTagsTest(VocabularyRemovalTest):
                            [('shared', IGNORE_SOURCE_SECTION)])
         vocabulary = Vocabulary(self.root)
         self.assertNotIn('shared', vocabulary.ignore_tags(self.folder))
-        self.assertIn('shared', vocabulary.ignore_tags(other))
+        self.assertNotIn('shared', vocabulary.ignore_tags(other))
+        self.assertIn('#myfolder, otherfolder', self.ignore_text())
+
+    def test_a_tag_that_other_projects_have_too_is_removed_from_them(self):
+        # The sections of a dataset are often copies of each other, and
+        # removing the tag from one of them only would ask for the same
+        # work in every other project.
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder\nshared\n'
+            '#otherfolder\nshared\n')
+        removed = remove_ignore_tags(self.root, self.folder,
+                                     [('shared', IGNORE_SOURCE_SECTION)])
+        self.assertEqual(removed, [('shared', IGNORE_SOURCE_SECTION)])
+        vocabulary = Vocabulary(self.root)
+        self.assertNotIn('shared', vocabulary.ignore_tags(self.folder))
+        self.assertNotIn('shared', vocabulary.ignore_tags(other))
+
+    def test_a_tag_of_one_project_only_is_removed_from_it_only(self):
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder\nmine\n'
+            '#otherfolder\ntheirs\n')
+        remove_ignore_tags(self.root, self.folder,
+                           [('mine', IGNORE_SOURCE_SECTION)])
+        vocabulary = Vocabulary(self.root)
+        self.assertNotIn('mine', vocabulary.ignore_tags(self.folder))
+        self.assertIn('theirs', vocabulary.ignore_tags(other))
+
+    def test_a_tag_is_reported_once_when_several_projects_have_it(self):
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder\nshared\n'
+            '#otherfolder\nshared\n')
+        removed = remove_ignore_tags(self.root, self.folder,
+                                     [('shared', IGNORE_SOURCE_SECTION)])
+        self.assertEqual(removed, [('shared', IGNORE_SOURCE_SECTION)])
 
     def test_the_root_folder_has_no_folder_file_source(self):
         # The root `.ignoretags` file holds the global block and the

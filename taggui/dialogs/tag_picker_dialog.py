@@ -80,11 +80,22 @@ class TagPickerDialog(QDialog):
         self.populate()
         self.update_selection_count()
 
+    def label_for(self, tag: str, detail: str) -> str:
+        """The label of a row.
+
+        It is the label of the tag when there is one — the source of the
+        tag can be named after the tag itself — and the label of the
+        source otherwise.
+        """
+        if (tag, detail) in self.detail_labels:
+            return self.detail_labels[(tag, detail)]
+        return self.detail_labels.get(detail, detail)
+
     def populate(self):
         """Fills the list with the tags."""
         self.tag_list.clear()
         for tag, detail in self.items:
-            label = self.detail_labels.get(detail, detail)
+            label = self.label_for(tag, detail)
             text = f'{tag}  ({label})' if label else tag
             item = QListWidgetItem(text)
             item.setData(TAG_ROLE, tag)

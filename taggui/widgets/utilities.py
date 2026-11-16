@@ -20,7 +20,8 @@ from tagging.vocabulary import (IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
                                 get_dataset_folders_from_images,
                                 get_most_common_first_tag, list_base_tags,
                                 list_ignore_section_folders, list_ignore_tags,
-                                remove_base_tags, remove_ignore_tags)
+                                list_shared_section_tags, remove_base_tags,
+                                remove_ignore_tags)
 from utils.big_widgets import TallPushButton
 from utils.image import Image
 from utils.settings_widgets import SettingsBigCheckBox
@@ -304,7 +305,7 @@ class Utilities(QDockWidget):
             f'{folder.name}:\n{", ".join(added)}')
         self.update_description()
 
-    def get_ignore_source_labels(self, folder: Path) -> dict[str, str]:
+    def get_ignore_source_labels(self, folder: Path) -> dict:
         """The labels of the sources of the ignore tags of a folder.
 
         The names are the ones the reference script uses in its
@@ -312,25 +313,39 @@ class Utilities(QDockWidget):
         `.ignoretags` file, the name of the section for the section of
         that file, and `folder file` for the `.ignoretags` file of the
         folder.
+
+        A tag that other projects have too is removed from all of them,
+        and its row says so.
         """
-        return {
+        labels = {
             IGNORE_SOURCE_GLOBAL: 'global',
             IGNORE_SOURCE_SECTION: f'#{folder.name.lower()}',
             IGNORE_SOURCE_FILE: 'folder file',
         }
+        for tag, folders in list_shared_section_tags(
+                self.dataset_root, folder).items():
+            labels[(tag, IGNORE_SOURCE_SECTION)] = (
+                f'#{folder.name.lower()} (also {", ".join(folders)})')
+        return labels
 
     def get_ignore_description(self, folder: Path) -> str:
         """The explanation of the sources of the ignore tags of a folder."""
         section = f'#{folder.name.lower()}'
-        shared = [name for name in list_ignore_section_folders(
+        header_folders = [name for name in list_ignore_section_folders(
             self.dataset_root, folder) if name != folder.name.lower()]
-        if shared:
-            shared_text = (' This section is shared with '
-                           f'{", ".join(shared)}. Removing a tag from it '
-                           'removes the tag from this project only; the '
-                           'other projects keep it.')
+        shared = list_shared_section_tags(self.dataset_root, folder)
+        if header_folders:
+            header_text = (f' This section is shared with '
+                           f'{", ".join(header_folders)}.')
         else:
-            shared_text = ' This section belongs to this project only.'
+            header_text = ' This section belongs to this project only.'
+        if shared:
+            shared_text = (
+                ' A tag that another project has too is removed from every '
+                'project that has it, so that the sections that are copies '
+                'of each other stay the same.')
+        else:
+            shared_text = ''
         return (
             'The ignore tags that are checked are removed from the dataset. '
             'Each tag is shown with the place it comes from, so that a tag '
@@ -339,7 +354,7 @@ class Utilities(QDockWidget):
             f'dataset root, the tags before its first section. They are '
             f'ignored by every project of the dataset.\n'
             f'"{section}" is the section of that file for this project.'
-            f'{shared_text}\n'
+            f'{header_text}{shared_text}\n'
             f'"folder file" is the `.ignoretags` file of the {folder.name} '
             f'folder. It is ignored by this project only.')
 
@@ -369,16 +384,27 @@ class Utilities(QDockWidget):
                 self, 'Nothing Selected',
                 'No tags were selected — nothing was deleted.')
             return
+        # The shared tags are read before the removal, so that the
+        # projects they were removed from can be named.
+        shared = list_shared_section_tags(self.dataset_root, folder)
         removed = remove_ignore_tags(self.dataset_root, folder, selected)
         if not removed:
             QMessageBox.information(
                 self, 'Nothing Deleted',
                 'The selected tags were not found in the dataset.')
             return
+        lines = []
+        for tag, source in removed:
+            projects = shared.get(tag)
+            if source == IGNORE_SOURCE_SECTION and projects:
+                lines.append(f'{tag} — {", ".join([folder.name.lower()])}'
+                             f' and {", ".join(projects)}')
+            else:
+                lines.append(tag)
         QMessageBox.information(
             self, 'Ignore Tags Deleted',
             f'{len(removed)} tag(s) were removed from the ignore list:\n'
-            f'{", ".join(tag for tag, _ in removed)}')
+            + '\n'.join(lines))
         self.update_description()
 
     @Slot()

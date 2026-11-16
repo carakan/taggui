@@ -315,6 +315,32 @@ def list_ignore_section_folders(root: Path, folder: Path) -> list[str]:
     return []
 
 
+def list_shared_section_tags(root: Path, folder: Path) -> dict[str, list[str]]:
+    """The section tags of a folder that other projects have too.
+
+    The key is the tag, the value the names of the other projects whose
+    section holds the tag as well. A section that names several folders
+    shares its tags with all of them, and so does a tag that is written
+    in the sections of several projects — the sections of a dataset are
+    often copies of each other.
+    """
+    root = Path(root)
+    folder_name = folder.name.lower()
+    folders_by_tag: dict[str, set[str]] = {}
+    for _header, names, body in _read_ignore_blocks(root / '.ignoretags'):
+        if names is None:
+            continue
+        for tag in _tags_in_body(body):
+            folders_by_tag.setdefault(tag, set()).update(
+                name.lower() for name in names)
+    shared = {}
+    for tag, folders in folders_by_tag.items():
+        if folder_name in folders and len(folders) > 1:
+            shared[tag] = sorted(name for name in folders
+                                 if name != folder_name)
+    return shared
+
+
 def _tags_in_body(body: list[str]) -> set[str]:
     """The tags of the lines of a block."""
     tags = set()
@@ -414,30 +440,15 @@ def _remove_tags_from_tag_file(path: Path, tags: set[str]) -> set[str]:
 
 def _remove_section_tags(
         header: str | None, names: list[str], body: list[str],
-        folder_name: str,
         tags: set[str]) -> list[tuple[str | None, list[str] | None,
                                  list[str]]]:
-    """The blocks of a section, with the tags removed for one folder only.
+    """The block of a section, with the tags removed.
 
-    A section that names several folders is split into one section per
-    folder, so that the tags are removed for the folder that is asked for
-    and kept for the others.
+    The header and the names of the section are kept: a section that
+    names several folders stays one section, so that the file does not
+    fill up with a section per project.
     """
-    if folder_name.lower() not in [name.lower() for name in names]:
-        return [(header, names, body)]
-    present = tags & _tags_in_body(body)
-    if not present:
-        return [(header, names, body)]
-    if len(names) == 1:
-        return [(header, names, _remove_tags_from_body(body, present))]
-    blocks = []
-    for name in names:
-        if name.lower() == folder_name.lower():
-            blocks.append((f'#{name}', [name],
-                           _remove_tags_from_body(body, present)))
-        else:
-            blocks.append((f'#{name}', [name], list(body)))
-    return blocks
+    return [(header, names, _remove_tags_from_body(body, tags))]
 
 
 def remove_ignore_tags(root: Path, folder: Path, entries: list[tuple[str, str]]
@@ -450,6 +461,11 @@ def remove_ignore_tags(root: Path, folder: Path, entries: list[tuple[str, str]]
     that is in the global block and in a section can be removed from one of
     them and kept in the other.
 
+    A section tag is removed from every section that holds it, not only
+    from the section of the folder. The sections of a dataset are often
+    copies of each other, and removing the tag from one of them only
+    would ask for the same work in every other project.
+
     Returns the (tag, source) pairs that were removed.
     """
     root = Path(root)
@@ -461,6 +477,7 @@ def remove_ignore_tags(root: Path, folder: Path, entries: list[tuple[str, str]]
     file_tags = {tag for tag, source in entries
                  if source == IGNORE_SOURCE_FILE}
     removed: list[tuple[str, str]] = []
+    removed_section: set[str] = set()
 
     if global_tags or section_tags:
         path = root / '.ignoretags'
@@ -476,15 +493,17 @@ def remove_ignore_tags(root: Path, folder: Path, entries: list[tuple[str, str]]
                         (header, names,
                          _remove_tags_from_body(body, global_tags)))
                     continue
-                if folder.name.lower() in [name.lower() for name in names]:
-                    for tag in sorted(section_tags & _tags_in_body(body)):
-                        removed.append((tag, IGNORE_SOURCE_SECTION))
-                    new_blocks.extend(_remove_section_tags(
-                        header, names, body, folder.name.lower(),
-                        section_tags))
-                    continue
-                new_blocks.append((header, names, body))
+                # A section. The tags that other projects have too are
+                # removed here as well, so that the sections that are
+                # kept in sync stay in sync.
+                present = section_tags & _tags_in_body(body)
+                removed_section |= present
+                new_blocks.extend(_remove_section_tags(
+                    header, names, body, present))
             _write_ignore_blocks(path, new_blocks)
+
+    for tag in sorted(removed_section):
+        removed.append((tag, IGNORE_SOURCE_SECTION))
 
     if file_tags:
         path = folder / '.ignoretags'
