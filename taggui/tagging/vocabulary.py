@@ -243,12 +243,6 @@ IGNORE_SOURCE_GLOBAL = 'global'
 IGNORE_SOURCE_SECTION = 'section'
 IGNORE_SOURCE_FILE = 'file'
 
-# The sources of a base tag. The root `.basetags` file is shared with
-# every folder of the dataset, the `.basetags` file of the folder applies
-# to that folder only.
-BASE_SOURCE_ROOT = 'root'
-BASE_SOURCE_FOLDER = 'folder'
-
 
 def _normalize_tag(tag: str) -> str:
     """The form a tag is stored and compared in."""
@@ -273,19 +267,36 @@ def list_ignore_tags(root: Path, folder: Path) -> list[tuple[str, str]]:
     return entries
 
 
-def list_base_tags(root: Path, folder: Path) -> list[tuple[str, str]]:
-    """The base tags of a folder, with the source each one comes from.
+def list_base_tags(root: Path, folder: Path) -> list[str]:
+    """The base tags of a folder, merged.
 
-    A tag that is in several sources is listed once per source.
+    The root `.basetags` file comes first, then the tags of the folder
+    that are not in it, like the script does.
     """
     root = Path(root)
     folder = Path(folder)
-    entries = [(tag, BASE_SOURCE_ROOT)
-               for tag in parse_tag_file(root / '.basetags')]
-    if folder != root:
-        entries += [(tag, BASE_SOURCE_FOLDER)
-                    for tag in parse_tag_file(folder / '.basetags')]
-    return entries
+    tags = parse_tag_file(root / '.basetags')
+    for tag in parse_tag_file(folder / '.basetags'):
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def list_ignore_section_folders(root: Path, folder: Path) -> list[str]:
+    """The folders that share the `.ignoretags` section of a folder.
+
+    A section header may name several folders, and the tags of that
+    section are ignored by all of them.
+    """
+    root = Path(root)
+    folder = Path(folder)
+    for _header, names, _body in _read_ignore_blocks(root / '.ignoretags'):
+        if names is None:
+            continue
+        lowered = [name.lower() for name in names]
+        if folder.name.lower() in lowered:
+            return lowered
+    return []
 
 
 def _tags_in_body(body: list[str]) -> set[str]:
@@ -468,26 +479,18 @@ def remove_ignore_tags(root: Path, folder: Path, entries: list[tuple[str, str]]
 
 
 def remove_base_tags(root: Path, folder: Path,
-                     entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Removes the base tags of the given sources.
+                     tags: list[str]) -> list[str]:
+    """Removes the base tags of a folder.
 
-    `entries` are (tag, source) pairs, the source being one of
-    `BASE_SOURCE_ROOT` or `BASE_SOURCE_FOLDER`. Only the given sources are
-    touched.
+    The tags are removed from the `.basetags` file of the dataset root
+    and from the `.basetags` file of the folder, so that the tag is not a
+    base tag of the folder any more.
 
-    Returns the (tag, source) pairs that were removed.
+    Returns the tags that were removed.
     """
     root = Path(root)
     folder = Path(folder)
-    root_tags = {tag for tag, source in entries
-                 if source == BASE_SOURCE_ROOT}
-    folder_tags = {tag for tag, source in entries
-                   if source == BASE_SOURCE_FOLDER}
-    removed: list[tuple[str, str]] = []
-    for path, tags, source in ((root / '.basetags', root_tags,
-                                BASE_SOURCE_ROOT),
-                               (folder / '.basetags', folder_tags,
-                                BASE_SOURCE_FOLDER)):
-        for tag in sorted(_remove_tags_from_tag_file(path, tags)):
-            removed.append((tag, source))
-    return removed
+    removed = set()
+    for path in (root / '.basetags', folder / '.basetags'):
+        removed.update(_remove_tags_from_tag_file(path, set(tags)))
+    return sorted(removed)

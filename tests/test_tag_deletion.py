@@ -11,10 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'taggui'))
 
-from tagging.vocabulary import (BASE_SOURCE_FOLDER,  # noqa: E402
-                                BASE_SOURCE_ROOT, IGNORE_SOURCE_FILE,
+from tagging.vocabulary import (IGNORE_SOURCE_FILE,  # noqa: E402
                                 IGNORE_SOURCE_GLOBAL, IGNORE_SOURCE_SECTION,
-                                Vocabulary, list_base_tags, list_ignore_tags,
+                                Vocabulary, list_base_tags,
+                                list_ignore_section_folders, list_ignore_tags,
                                 remove_base_tags, remove_ignore_tags)
 
 
@@ -68,12 +68,43 @@ class ListIgnoreTagsTest(VocabularyRemovalTest):
 
 
 class ListBaseTagsTest(VocabularyRemovalTest):
-    """The listing of the base tags with their source."""
+    """The listing of the base tags of a folder."""
 
-    def test_every_source_is_listed(self):
-        entries = list_base_tags(self.root, self.folder)
-        self.assertIn(('baseroot1', BASE_SOURCE_ROOT), entries)
-        self.assertIn(('basefile1', BASE_SOURCE_FOLDER), entries)
+    def test_the_root_and_the_folder_tags_are_listed(self):
+        tags = list_base_tags(self.root, self.folder)
+        self.assertIn('baseroot1', tags)
+        self.assertIn('basefile1', tags)
+
+    def test_the_root_tags_come_first(self):
+        tags = list_base_tags(self.root, self.folder)
+        self.assertEqual(tags[:2], ['baseroot1', 'baseroot2'])
+
+    def test_a_tag_in_both_files_is_listed_once(self):
+        (self.root / '.basetags').write_text('baseroot1\n')
+        (self.folder / '.basetags').write_text('baseroot1\n')
+        tags = list_base_tags(self.root, self.folder)
+        self.assertEqual(tags.count('baseroot1'), 1)
+
+
+class ListIgnoreSectionFoldersTest(VocabularyRemovalTest):
+    """The folders that share the `.ignoretags` section of a folder."""
+
+    def test_a_section_of_one_folder_names_that_folder(self):
+        self.assertEqual(
+            list_ignore_section_folders(self.root, self.folder),
+            ['myfolder'])
+
+    def test_a_shared_section_names_every_folder(self):
+        (self.root / '.ignoretags').write_text(
+            '#myfolder, otherfolder\nshared\n')
+        self.assertEqual(
+            sorted(list_ignore_section_folders(self.root, self.folder)),
+            ['myfolder', 'otherfolder'])
+
+    def test_a_folder_without_a_section_names_nothing(self):
+        other = self.root / 'otherfolder'
+        other.mkdir()
+        self.assertEqual(list_ignore_section_folders(self.root, other), [])
 
 
 class RemoveIgnoreTagsTest(VocabularyRemovalTest):
@@ -193,38 +224,40 @@ class RemoveBaseTagsTest(VocabularyRemovalTest):
     """The removal of the base tags."""
 
     def test_a_root_tag_is_removed(self):
-        removed = remove_base_tags(
-            self.root, self.folder, [('baseroot1', BASE_SOURCE_ROOT)])
-        self.assertEqual(removed, [('baseroot1', BASE_SOURCE_ROOT)])
+        removed = remove_base_tags(self.root, self.folder, ['baseroot1'])
+        self.assertEqual(removed, ['baseroot1'])
         self.assertNotIn('baseroot1', self.base_text())
 
     def test_the_other_root_tags_are_kept(self):
-        remove_base_tags(self.root, self.folder,
-                         [('baseroot1', BASE_SOURCE_ROOT)])
+        remove_base_tags(self.root, self.folder, ['baseroot1'])
         self.assertIn('baseroot2', self.base_text())
 
     def test_a_folder_tag_is_removed(self):
-        removed = remove_base_tags(
-            self.root, self.folder, [('basefile1', BASE_SOURCE_FOLDER)])
-        self.assertEqual(removed, [('basefile1', BASE_SOURCE_FOLDER)])
+        removed = remove_base_tags(self.root, self.folder, ['basefile1'])
+        self.assertEqual(removed, ['basefile1'])
         self.assertNotIn('basefile1',
                          (self.folder / '.basetags').read_text())
 
-    def test_a_root_tag_is_kept_when_its_folder_tag_is_removed(self):
-        remove_base_tags(self.root, self.folder,
-                         [('baseroot1', BASE_SOURCE_ROOT)])
+    def test_a_tag_in_both_files_is_removed_from_both(self):
+        (self.root / '.basetags').write_text('shared\n')
+        (self.folder / '.basetags').write_text('shared\n')
+        remove_base_tags(self.root, self.folder, ['shared'])
+        self.assertNotIn('shared', self.base_text())
+        self.assertNotIn('shared',
+                         (self.folder / '.basetags').read_text())
+
+    def test_the_tag_is_not_a_base_tag_any_more(self):
+        remove_base_tags(self.root, self.folder, ['baseroot1'])
         vocabulary = Vocabulary(self.root)
         self.assertNotIn('baseroot1', vocabulary.basetags(self.folder))
 
     def test_a_tag_that_is_not_there_is_not_reported(self):
-        removed = remove_base_tags(
-            self.root, self.folder, [('nosuchtag', BASE_SOURCE_ROOT)])
+        removed = remove_base_tags(self.root, self.folder, ['nosuchtag'])
         self.assertEqual(removed, [])
 
     def test_no_file_is_created_when_there_is_none(self):
         (self.root / '.basetags').unlink()
-        remove_base_tags(self.root, self.folder,
-                         [('baseroot1', BASE_SOURCE_ROOT)])
+        remove_base_tags(self.root, self.folder, ['baseroot1'])
         self.assertFalse((self.root / '.basetags').exists())
 
 
@@ -343,7 +376,7 @@ class UtilitiesDeletionTest(unittest.TestCase):
 
     def test_delete_base_tags_removes_the_selected_tags(self):
         utilities = self.make_utilities()
-        self.checked_items = [('baseroot1', BASE_SOURCE_ROOT)]
+        self.checked_items = [('baseroot1', '')]
         utilities.delete_base_tags()
         vocabulary = Vocabulary(self.root)
         self.assertNotIn('baseroot1', vocabulary.basetags(self.folder))
@@ -351,10 +384,30 @@ class UtilitiesDeletionTest(unittest.TestCase):
 
     def test_delete_base_tags_removes_a_folder_tag(self):
         utilities = self.make_utilities()
-        self.checked_items = [('basefile1', BASE_SOURCE_FOLDER)]
+        self.checked_items = [('basefile1', '')]
         utilities.delete_base_tags()
         vocabulary = Vocabulary(self.root)
         self.assertNotIn('basefile1', vocabulary.basetags(self.folder))
+
+    def test_the_ignore_sources_use_the_names_of_the_script(self):
+        utilities = self.make_utilities()
+        labels = utilities.get_ignore_source_labels(self.folder)
+        self.assertEqual(labels[IGNORE_SOURCE_GLOBAL], 'global')
+        self.assertEqual(labels[IGNORE_SOURCE_SECTION], '#myfolder')
+        self.assertEqual(labels[IGNORE_SOURCE_FILE], 'folder file')
+
+    def test_the_description_names_the_shared_section(self):
+        utilities = self.make_utilities()
+        (self.root / '.ignoretags').write_text(
+            '#myfolder, otherfolder\nshared\n')
+        description = utilities.get_ignore_description(self.folder)
+        self.assertIn('#myfolder', description)
+        self.assertIn('otherfolder', description)
+
+    def test_the_description_says_when_a_section_is_not_shared(self):
+        utilities = self.make_utilities()
+        description = utilities.get_ignore_description(self.folder)
+        self.assertIn('belongs to this project only', description)
 
 
 if __name__ == '__main__':

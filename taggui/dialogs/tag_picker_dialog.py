@@ -85,7 +85,8 @@ class TagPickerDialog(QDialog):
         self.tag_list.clear()
         for tag, detail in self.items:
             label = self.detail_labels.get(detail, detail)
-            item = QListWidgetItem(f'{tag}  ({label})')
+            text = f'{tag}  ({label})' if label else tag
+            item = QListWidgetItem(text)
             item.setData(TAG_ROLE, tag)
             item.setData(DETAIL_ROLE, detail)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)

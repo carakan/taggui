@@ -13,28 +13,15 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDockWidget, QFormLayout,
 
 from dialogs.tag_picker_dialog import TagPickerDialog
 from models.image_list_model import ImageListModel
-from tagging.vocabulary import (BASE_SOURCE_FOLDER, BASE_SOURCE_ROOT,
-                                IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
+from tagging.vocabulary import (IGNORE_SOURCE_FILE, IGNORE_SOURCE_GLOBAL,
                                 IGNORE_SOURCE_SECTION, Vocabulary,
                                 append_basetags, append_ignore_tags,
                                 count_tags, get_dataset_folders_from_images,
                                 get_most_common_first_tag, list_base_tags,
-                                list_ignore_tags, remove_base_tags,
-                                remove_ignore_tags)
+                                list_ignore_section_folders, list_ignore_tags,
+                                remove_base_tags, remove_ignore_tags)
 from utils.big_widgets import TallPushButton
 from utils.image import Image
-
-# The labels of the sources of the ignore tags and the base tags, shown
-# next to a tag in the deletion dialogs.
-IGNORE_SOURCE_LABELS = {
-    IGNORE_SOURCE_GLOBAL: 'global',
-    IGNORE_SOURCE_SECTION: 'this project',
-    IGNORE_SOURCE_FILE: 'this folder',
-}
-BASE_SOURCE_LABELS = {
-    BASE_SOURCE_ROOT: 'all projects',
-    BASE_SOURCE_FOLDER: 'this project',
-}
 
 
 class Utilities(QDockWidget):
@@ -294,6 +281,45 @@ class Utilities(QDockWidget):
             f'{folder.name}:\n{", ".join(added)}')
         self.update_description()
 
+    def get_ignore_source_labels(self, folder: Path) -> dict[str, str]:
+        """The labels of the sources of the ignore tags of a folder.
+
+        The names are the ones the reference script uses in its
+        `--show-meta` output: `global` for the global block of the root
+        `.ignoretags` file, the name of the section for the section of
+        that file, and `folder file` for the `.ignoretags` file of the
+        folder.
+        """
+        return {
+            IGNORE_SOURCE_GLOBAL: 'global',
+            IGNORE_SOURCE_SECTION: f'#{folder.name.lower()}',
+            IGNORE_SOURCE_FILE: 'folder file',
+        }
+
+    def get_ignore_description(self, folder: Path) -> str:
+        """The explanation of the sources of the ignore tags of a folder."""
+        section = f'#{folder.name.lower()}'
+        shared = [name for name in list_ignore_section_folders(
+            self.dataset_root, folder) if name != folder.name.lower()]
+        if shared:
+            shared_text = (' This section is shared with '
+                           f'{", ".join(shared)}. Removing a tag from it '
+                           'removes the tag from this project only; the '
+                           'other projects keep it.')
+        else:
+            shared_text = ' This section belongs to this project only.'
+        return (
+            'The ignore tags that are checked are removed from the dataset. '
+            'Each tag is shown with the place it comes from, so that a tag '
+            'can be removed from one place and kept in the others.\n'
+            f'"global" is the global block of the `.ignoretags` file of the '
+            f'dataset root, the tags before its first section. They are '
+            f'ignored by every project of the dataset.\n'
+            f'"{section}" is the section of that file for this project.'
+            f'{shared_text}\n'
+            f'"folder file" is the `.ignoretags` file of the {folder.name} '
+            f'folder. It is ignored by this project only.')
+
     @Slot()
     def delete_ignore_tags(self):
         """Picks the ignore tags to delete and removes them."""
@@ -309,18 +335,9 @@ class Utilities(QDockWidget):
         dialog = TagPickerDialog(
             parent=self,
             title='Delete Ignore Tags',
-            description=('The ignore tags that are checked are removed from '
-                         'the dataset. Each tag is shown with the place it '
-                         'comes from, so that a tag can be removed from one '
-                         'place and kept in the others. '
-                         '"global" is the global block of the root '
-                         '`.ignoretags` file, which applies to every '
-                         'project of the dataset; "this project" is the '
-                         f'`#{folder.name.lower()}` section of that file; '
-                         '"this folder" is the `.ignoretags` file of the '
-                         'folder itself.'),
+            description=self.get_ignore_description(folder),
             items=entries, accept_text='Delete',
-            detail_labels=IGNORE_SOURCE_LABELS)
+            detail_labels=self.get_ignore_source_labels(folder))
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         selected = dialog.get_checked_items()
@@ -347,8 +364,8 @@ class Utilities(QDockWidget):
         folder = self.get_current_folder()
         if folder is None:
             return
-        entries = list_base_tags(self.dataset_root, folder)
-        if not entries:
+        tags = list_base_tags(self.dataset_root, folder)
+        if not tags:
             QMessageBox.information(
                 self, 'No Tags',
                 'There are no base tags to delete in this folder.')
@@ -356,18 +373,14 @@ class Utilities(QDockWidget):
         dialog = TagPickerDialog(
             parent=self,
             title='Delete Base Tags',
-            description=('The base tags that are checked are removed from '
-                         'the dataset. Each tag is shown with the place it '
-                         'comes from, so that a tag can be removed from one '
-                         'place and kept in the others. "all projects" is the '
-                         '`.basetags` file of the dataset root, which is '
-                         'shared with every project; "this project" is the '
-                         '`.basetags` file of the folder itself.'),
-            items=entries, accept_text='Delete',
-            detail_labels=BASE_SOURCE_LABELS)
+            description=('The base tags of this project. The tags that are '
+                         'checked are removed from the `.basetags` file of '
+                         f'the {folder.name} folder, so that they are not '
+                         'sent to the model with the images any more.'),
+            items=[(tag, '') for tag in tags], accept_text='Delete')
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        selected = dialog.get_checked_items()
+        selected = dialog.get_checked_tags()
         if not selected:
             QMessageBox.information(
                 self, 'Nothing Selected',
@@ -382,5 +395,5 @@ class Utilities(QDockWidget):
         QMessageBox.information(
             self, 'Base Tags Deleted',
             f'{len(removed)} tag(s) were removed from the base tags:\n'
-            f'{", ".join(tag for tag, _ in removed)}')
+            f'{", ".join(removed)}')
         self.update_description()
