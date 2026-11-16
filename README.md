@@ -47,6 +47,11 @@ images.
 Any changes you make to the tags are also automatically saved to these `.txt`
 files.
 
+`File` -> `Open Recent` lists the directories that were opened last, the
+most recent one first, so that a project is one click away. The list is
+kept between the runs, holds the ten last directories, and drops the ones
+that are gone. `Clear List` empties it.
+
 ### Settings
 
 `File` -> `Settings` holds the settings of the application:

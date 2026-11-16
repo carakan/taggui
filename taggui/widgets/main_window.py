@@ -5,8 +5,8 @@ from PySide6.QtCore import QKeyCombination, QModelIndex, QTimer, QUrl, Qt, Slot
 from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QIcon,
                            QKeySequence, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow,
-                               QMessageBox, QStackedWidget, QVBoxLayout,
-                               QWidget)
+                               QMenu, QMessageBox, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from dialogs.batch_reorder_tags_dialog import BatchReorderTagsDialog
 from dialogs.find_and_replace_dialog import FindAndReplaceDialog
@@ -18,6 +18,10 @@ from models.tag_counter_model import TagCounterModel
 from utils.big_widgets import BigPushButton
 from utils.image import Image
 from utils.key_press_forwarder import KeyPressForwarder
+from utils.recent_directories import (add_recent_directory,
+                                      clear_recent_directories,
+                                      get_recent_directories,
+                                      remove_missing_directories)
 from utils.settings import DEFAULT_SETTINGS, get_settings, get_tag_separator
 from utils.shortcut_remover import ShortcutRemover
 from utils.git_info import GitCaptionState
@@ -254,6 +258,9 @@ class MainWindow(QMainWindow):
         self.utilities.set_directory_path(self.directory_path)
         self.git_caption_state.set_directory(self.directory_path)
         self.update_image_info_overlay()
+        # The directory joins the list of the ones that were opened last.
+        add_recent_directory(self.directory_path)
+        self.update_recent_directories_menu()
 
     @Slot()
     def select_and_load_directory(self):
@@ -266,6 +273,33 @@ class MainWindow(QMainWindow):
             return
         self.load_directory(Path(load_directory_path),
                             save_path_to_settings=True)
+
+    def update_recent_directories_menu(self):
+        """Fills the `Open Recent` menu with the directories that were
+        opened last."""
+        self.recent_directories_menu.clear()
+        directories = remove_missing_directories()
+        if not directories:
+            empty_action = self.recent_directories_menu.addAction(
+                'No recent directories')
+            empty_action.setEnabled(False)
+            return
+        for directory in directories:
+            action = self.recent_directories_menu.addAction(
+                f'{directory.name} — {directory.parent.name}')
+            action.setToolTip(str(directory))
+            action.triggered.connect(
+                lambda _checked=False, path=directory:
+                self.load_directory(path))
+        self.recent_directories_menu.addSeparator()
+        clear_action = self.recent_directories_menu.addAction('Clear List')
+        clear_action.triggered.connect(self.clear_recent_directories_menu)
+
+    @Slot()
+    def clear_recent_directories_menu(self):
+        """Empties the `Open Recent` menu."""
+        clear_recent_directories()
+        self.update_recent_directories_menu()
 
     @Slot()
     def reload_directory(self):
@@ -339,6 +373,9 @@ class MainWindow(QMainWindow):
         load_directory_action.setShortcut(QKeySequence('Ctrl+L'))
         load_directory_action.triggered.connect(self.select_and_load_directory)
         file_menu.addAction(load_directory_action)
+        self.recent_directories_menu = QMenu('Open Recent', parent=self)
+        file_menu.addMenu(self.recent_directories_menu)
+        self.update_recent_directories_menu()
         self.reload_directory_action.setShortcuts(
             [QKeySequence('Ctrl+Shift+L'), QKeySequence('F5')])
         self.reload_directory_action.triggered.connect(self.reload_directory)
